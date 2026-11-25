@@ -47,7 +47,6 @@ class CryptoTest {
         val raw = "校园卡-AES-数据".encodeToByteArray()
         val encoded = base64Encode(raw)
         assertContentEquals(raw, base64Decode(encoded))
-        assertContentEquals(raw, base64Decode(encoded.chunked(4).joinToString("
-")))
+        assertContentEquals(raw, base64Decode(encoded.chunked(4).joinToString("\n")))
     }
 }
