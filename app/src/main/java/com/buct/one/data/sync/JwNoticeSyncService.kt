@@ -1,6 +1,7 @@
 package com.buct.one.data.sync
 
 import android.content.Context
+import com.buct.course.login.AndroidHttpClients
 import com.buct.course.manager.UserManager
 import com.buct.one.data.model.DomainSlice
 import com.buct.one.data.model.JwAnnouncementDetail
@@ -10,6 +11,7 @@ import com.buct.one.data.model.JwReminderItem
 import com.buct.one.data.model.RefreshState
 import com.buct.one.data.session.SidPortalSessionVault
 import com.buct.one.data.source.jwnotice.JwNoticeClient
+import com.buct.one.data.source.jwnotice.JwNoticeGateway
 import com.buct.one.data.source.jwnotice.JwNoticeParser
 import com.buct.one.data.store.JwNoticeStore
 import kotlinx.coroutines.Dispatchers
@@ -74,6 +76,15 @@ class JwNoticeSyncService private constructor(
         }
     }
 
+    /**
+     * 构造共享层网关：把 OkHttp 会话 Cookie 种入共享 CookieStore，
+     * 之后教务消息的请求/解析全部走 `JwNoticeGateway`（与 iOS 同一份实现）。
+     */
+    private fun sharedGateway(): JwNoticeGateway {
+        AndroidHttpClients.seedCookies("jwglxt.buct.edu.cn", client.exportJwCookieHeader())
+        return JwNoticeGateway(AndroidHttpClients.session, userAgent = client.userAgent())
+    }
+
     private fun persistSidPortalCookies() {
         val currentSid = client.exportSidPortalCookieHeader()
         if (currentSid.isNotBlank() && currentSid != lastRestoredSidCookie) {
@@ -84,7 +95,7 @@ class JwNoticeSyncService private constructor(
 
     private suspend fun <T> executeWithAutoRelogin(
         userInitiated: Boolean = false,
-        block: () -> T
+        block: suspend () -> T
     ): T {
         val sidBefore = SidPortalSessionVault.readCookies(appContext).first
         restoreSessionCookies()
@@ -126,7 +137,7 @@ class JwNoticeSyncService private constructor(
                 _syncing.value = true
                 try {
                     val snapshot = executeWithAutoRelogin(userInitiated = userInitiated) {
-                        client.fetchFullSnapshot()
+                        sharedGateway().fetchFullSnapshot()
                     }
                     val committed = store.commitSuccess(
                         snapshot = snapshot,
@@ -154,7 +165,7 @@ class JwNoticeSyncService private constructor(
         syncMutex.withLock {
             try {
                 val (total, items) = executeWithAutoRelogin(userInitiated = true) {
-                    client.fetchRemindersPage(page = page, keyword = keyword)
+                    sharedGateway().fetchRemindersPage(page = page, keyword = keyword)
                 }
                 Result.success(total to store.applyReadToReminders(items, JwNoticeParser.PARSER_VERSION))
             } catch (e: Exception) {
@@ -170,7 +181,7 @@ class JwNoticeSyncService private constructor(
         syncMutex.withLock {
             try {
                 val (total, items) = executeWithAutoRelogin(userInitiated = true) {
-                    client.fetchAnnouncementsPage(page = page, keyword = keyword)
+                    sharedGateway().fetchAnnouncementsPage(page = page, keyword = keyword)
                 }
                 Result.success(total to store.applyReadToAnnouncements(items, JwNoticeParser.PARSER_VERSION))
             } catch (e: Exception) {
@@ -184,7 +195,7 @@ class JwNoticeSyncService private constructor(
             syncMutex.withLock {
                 try {
                     val detail = executeWithAutoRelogin(userInitiated = true) {
-                        client.fetchAnnouncementDetail(item)
+                        sharedGateway().fetchAnnouncementDetail(item)
                     }
                     _noticeState.value = store.markAnnouncementRead(item.id, JwNoticeParser.PARSER_VERSION)
                     Result.success(detail)
@@ -222,7 +233,7 @@ class JwNoticeSyncService private constructor(
                 }
                 SsoSilentRelogin.resetCooldown()
                 persistSidPortalCookies()
-                val snapshot = client.fetchFullSnapshot()
+                val snapshot = sharedGateway().fetchFullSnapshot()
                 val committed = store.commitSuccess(
                     snapshot = snapshot,
                     parserVersion = JwNoticeParser.PARSER_VERSION

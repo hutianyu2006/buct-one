@@ -85,6 +85,12 @@ class JwNoticeClient {
         return false
     }
 
+    /** 导出当前 jwglxt 会话 Cookie 头，供共享层网关复用同一登录态。 */
+    fun exportJwCookieHeader(): String = cookieJar.cookieHeaderFor(JW_BASE.toHttpUrl())
+
+    /** 与客户端内部一致的 User-Agent，供共享层网关使用。 */
+    fun userAgent(): String = UA
+
     fun importJwCookies(rawCookieHeader: String) {
         if (importCookiesForHost(
                 hostUrl = "$JW_BASE/jwglxt/".toHttpUrl(),
