@@ -1,0 +1,88 @@
+name: ios-build
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'shared/**'
+      - 'iosApp/**'
+      - 'settings.gradle'
+      - 'build.gradle'
+      - 'gradle.properties'
+      - 'gradle/**'
+      - '.github/workflows/ios.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'shared/**'
+      - 'iosApp/**'
+      - 'settings.gradle'
+      - 'build.gradle'
+      - 'gradle.properties'
+      - 'gradle/**'
+      - '.github/workflows/ios.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ios-build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-ios:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Cache Kotlin/Native toolchain
+        uses: actions/cache@v4
+        with:
+          path: ~/.konan
+          key: konan-${{ runner.os }}-2.4.20
+          restore-keys: |
+            konan-${{ runner.os }}-
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Compile shared framework (iOS Simulator)
+        run: |
+          set -o pipefail
+          LOG_FILE="$RUNNER_TEMP/ios-build.log"
+          chmod +x ./gradlew
+          ./gradlew :shared:linkDebugFrameworkIosSimulatorArm64 \
+            --configure-on-demand --no-configuration-cache --build-cache --stacktrace 2>&1 | tee "$LOG_FILE"
+
+      - name: Build iOS app (Simulator)
+        run: |
+          set -o pipefail
+          LOG_FILE="$RUNNER_TEMP/ios-build.log"
+          xcodebuild -project iosApp/iosApp.xcodeproj -scheme iosApp \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build 2>&1 | tee -a "$LOG_FILE"
+
+      # 临时调试步骤：失败时把构建日志推送到 ci-ios-log 分支，便于定位问题。
+      - name: Publish build log on failure
+        if: failure()
+        run: |
+          set -x
+          LOG_FILE="$RUNNER_TEMP/ios-build.log"
+          [ -f "$LOG_FILE" ] || exit 0
+          tail -c 300000 "$LOG_FILE" > ci-ios-build.log || true
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B ci-ios-log
+          git add -f ci-ios-build.log
+          git commit -m "ci: iOS 构建失败日志（自动生成，可忽略）" || exit 0
+          git push --force origin ci-ios-log

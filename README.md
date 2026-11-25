@@ -136,7 +136,8 @@ model/    → 零任何外部 import
 | 包名标识 | `com.buct.one`（源码包名 `com.buct.course` / `com.buct.one.data`） |
 | 网络与安全 | OkHttp + BouncyCastle（SM2）+ `BuctTlsTrustManager` + `Android Keystore` |
 | 持久化 | 分域 JSON 原子落盘 + 加密会话 Vault + `SharedPreferences` |
-| 构建与交付 | 单 module，全云端 GitHub Actions CI（JDK 21，100MB APK 体积硬门禁，R2 + Release 双源发布） |
+| 构建与交付 | Android 单 module，全云端 GitHub Actions CI（JDK 21，100MB APK 体积硬门禁，R2 + Release 双源发布） |
+| 跨端（iOS 预览版） | Kotlin Multiplatform + Compose Multiplatform：`shared/` 共享公告通道与 Compose UI，`iosApp/` SwiftUI 壳，`ios-build` 在 macOS runner 构建 |
 
 ---
 
@@ -146,6 +147,13 @@ model/    → 零任何外部 import
 
 ```bash
 ./gradlew assembleRelease
+```
+
+iOS 预览版（`shared/` + `iosApp/`）需要 macOS + Xcode 与 JDK 21，模拟器构建由 `ios-build` 工作流自动完成；本机可这样验证：
+
+```bash
+./gradlew :shared:linkDebugFrameworkIosSimulatorArm64   # 仅验证 Kotlin 共享层
+open iosApp/iosApp.xcodeproj                            # 用 Xcode 运行 iOS App
 ```
 
 正式发布签名配置与 Keystore 规范请参阅 [签名接入指南](docs/签名接入.md)。
@@ -172,6 +180,7 @@ model/    → 零任何外部 import
 - [x] **作业与考试 Excel/CSV 表格批量导入**：支持标准模板分享、表格解析审核导入与校园邮箱附件一键导入
 - [x] **本地轻量智能提醒与桌面小组件扩展**：作业 DDL / 考试倒计时 / 图书到期 / 电费与校园卡低余额提醒，以及 DDL 倒计时、余额信息卡小组件
 - [x] **成绩 GPA 试算、多级树状培养方案与校园卡消费洞察**：官方累计 GPA 折线图、目标 GPA 试算、培养方案树状结构展开交互与消费分类占比统计
+- [x] **iOS 预览版起步**：Kotlin Multiplatform 共享模块 + Compose Multiplatform UI，先接通公告通道（`notice.buct.one`），教务 / 校园卡等模块按域逐步迁移
 - [ ] 东区 ↔ 昌平通勤班车时刻表 & 实用校内入口轻导航
 - [ ] 全数据域 Parser 离线单测回归（已覆盖正方教务、北化在线资源、电费与校园网，其余域持续补齐）
 
@@ -185,8 +194,10 @@ model/    → 零任何外部 import
 app/src/main/java/
   com/buct/course/    主应用 UI、独立页（一卡通/实践教学/第二课堂/体测/校园邮箱/i北化/教务消息/宿舍电费/校园网网费）、教务适配、自动更新、匿名统计、桌面小组件
   com/buct/one/data/  纯分层数据内核（model / session / source / store / sync）
+shared/src/           Kotlin Multiplatform 共享模块（commonMain 公告通道 + Compose Multiplatform UI，iosMain 平台实现）
+iosApp/               iOS 宿主工程（SwiftUI 壳 + Xcode 工程，加载 :shared 的 Shared.framework）
 docs/                 路线规划（规划.md）与正式发布签名配置（签名接入.md）
-.github/workflows/    GitHub Actions 静态门禁（check.yml）、APK 构建（build-apk.yml）与标签发版（release-apk.yml）
+.github/workflows/    GitHub Actions 静态门禁（check.yml）、APK 构建（build-apk.yml）、iOS 构建（ios.yml）与标签发版（release-apk.yml）
 NOTICE                上游开源工程溯源与许可声明
 LICENSE               GNU General Public License v3.0
 ```

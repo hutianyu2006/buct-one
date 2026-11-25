@@ -10,6 +10,8 @@ pluginManagement {
     plugins {
         id 'org.jetbrains.kotlin.android' version '2.4.20'
         id 'org.jetbrains.kotlin.plugin.compose' version '2.4.20'
+        id 'org.jetbrains.kotlin.multiplatform' version '2.4.20'
+        id 'org.jetbrains.kotlin.plugin.serialization' version '2.4.20'
     }
 }
 
@@ -24,4 +26,6 @@ dependencyResolutionManagement {
 }
 
 include ':app'
+// iOS 端：Kotlin Multiplatform 共享模块 + Compose Multiplatform UI（仅 Apple 目标，不进 APK）
+include ':shared'
 rootProject.name = "BuctOne"
