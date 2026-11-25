@@ -32,7 +32,7 @@ class JwNoticeController(
 ) {
 
     /** 四条数据层铁律由共享 [DomainSync] 统一执行（失败保留旧数据、capturedAt 单调、NEVER≠EMPTY）。 */
-    private val sync = DomainSync(
+    private val sync = DomainSync<JwNoticeSnapshot>(
         source = "jwnotice",
         parserVersion = JwNoticeParser.PARSER_VERSION,
         isEmpty = { it.reminders.isEmpty() && it.announcements.isEmpty() },

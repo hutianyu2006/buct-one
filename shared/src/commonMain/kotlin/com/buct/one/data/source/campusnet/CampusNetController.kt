@@ -22,7 +22,7 @@ class CampusNetController(
     private val cache: CampusNetSnapshotStore? = null,
 ) {
 
-    private val sync = DomainSync(
+    private val sync = DomainSync<CampusNetSnapshot>(
         source = "campusnet",
         parserVersion = com.buct.one.data.source.campusnet.CampusNetParser.PARSER_VERSION,
         isEmpty = { false },
