@@ -33,6 +33,8 @@ kotlin {
             // jsoup 的 Kotlin Multiplatform 移植版，解析层双端复用
             // 解析器公共签名暴露 Ksoup 类型，需要 api 而不是 implementation
             api("com.fleeksoft.ksoup:ksoup:0.2.6")
+            // SM2 国密需要的双端大整数（按 Kotlin 2.4 同代构建）
+            implementation("com.ionspin.kotlin:bignum:0.4.0")
         }
         commonTest.dependencies {
             implementation(kotlin("test"))
@@ -45,6 +47,8 @@ kotlin {
         }
         jvmTest.dependencies {
             compileOnly("org.jetbrains.compose.runtime:runtime:$composeVersion")
+            // 仅测试用：用 BouncyCastle 做 SM2 差分校验（共享实现加密 → BC 解密）
+            implementation("org.bouncycastle:bcprov-jdk15to18:1.70")
         }
         iosMain.dependencies {
             implementation("org.jetbrains.compose.runtime:runtime:$composeVersion")
