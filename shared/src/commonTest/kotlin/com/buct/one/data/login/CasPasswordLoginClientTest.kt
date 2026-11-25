@@ -51,7 +51,10 @@ class CasPasswordLoginClientTest {
                     respond(
                         "",
                         HttpStatusCode.Found,
-                        headersOf(HttpHeaders.Location, "/account", HttpHeaders.SetCookie, "SESSION=abc123; Path=/"),
+                        headersOf(
+                            HttpHeaders.Location to listOf("/account"),
+                            HttpHeaders.SetCookie to listOf("SESSION=abc123; Path=/"),
+                        ),
                     )
                 }
                 request.url.encodedPath == "/account" -> {
@@ -124,7 +127,7 @@ class CasPasswordLoginClientTest {
 
     @Test
     fun missingKey_returnsFailed() = runTest {
-        val brokenPage = "<html><body><p id="login-page-flowkey">flow</p></body></html>"
+        val brokenPage = "<html><body><p id=\"login-page-flowkey\">flow</p></body></html>"
         val engine = MockEngine { respond(brokenPage, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "text/html")) }
         val client = buildHttpClient(engine, followRedirects = false)
         val outcome = CasPasswordLoginClient(client, userAgent = "test-UA").login("20230001", "p@ss")
