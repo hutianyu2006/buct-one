@@ -1,5 +1,11 @@
 package com.buct.one.data.source.jwnotice
 
+import com.buct.one.data.model.JwAnnouncementItem
+import com.buct.one.data.model.JwNoticeSnapshot
+import com.buct.one.data.model.JwReminderCategory
+import com.buct.one.data.model.JwReminderItem
+import com.buct.one.data.store.JwNoticeSnapshotStore
+import com.buct.one.platform.InMemoryKeyValueStore
 import com.buct.one.platform.buildHttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -47,6 +53,31 @@ class JwNoticeControllerTest {
         val controller = controller(reminders = "<html><body><p id=\"login-page-flowkey\">x</p></body></html>")
         controller.refresh()
         assertTrue(controller.state.value is JwNoticeUiState.AuthExpired)
+    }
+
+    @Test
+    fun restoreFromCache_rendersCachedSnapshotWithoutNetwork() = runTest {
+        val cached = JwNoticeSnapshot(
+            reminders = listOf(
+                JwReminderItem("r1", "缓存提醒", "内容", "2026-11-20", false, JwReminderCategory.OTHER),
+            ),
+            reminderTotal = 1,
+            announcements = listOf(
+                JwAnnouncementItem("a1", "缓存公告", "教务处", "2026-11-19", false, false, "", ""),
+            ),
+            announcementTotal = 1,
+        )
+        val kv = InMemoryKeyValueStore()
+        JwNoticeSnapshotStore(kv).save(cached)
+        val failing = JwNoticeController(
+            JwNoticeGateway(buildHttpClient(MockEngine { error("offline") }), userAgent = "test-UA"),
+            cache = JwNoticeSnapshotStore(kv),
+        )
+        assertTrue(failing.restoreFromCache())
+        val state = failing.state.value
+        assertTrue(state is JwNoticeUiState.Loaded)
+        assertEquals(1, (state as JwNoticeUiState.Loaded).snapshot.reminders.size)
+        assertEquals("缓存提醒", state.snapshot.reminders[0].title)
     }
 
     @Test

@@ -24,8 +24,11 @@ import com.buct.one.data.login.CasPasswordLoginClient
 import com.buct.one.data.login.LoginState
 import com.buct.one.data.source.campusnet.CampusNetController
 import com.buct.one.data.source.campusnet.CampusNetGateway
+import com.buct.one.data.store.CampusNetSnapshotStore
+import com.buct.one.data.store.JwNoticeSnapshotStore
 import com.buct.one.data.source.jwnotice.JwNoticeController
 import com.buct.one.data.source.jwnotice.JwNoticeGateway
+import com.buct.one.platform.UserDefaultsKeyValueStore
 import com.buct.one.platform.createIosSessionClient
 import com.buct.one.shared.notice.AppNotice
 import com.buct.one.shared.notice.NoticeRepository
@@ -61,11 +64,18 @@ fun App() {
                 CasPasswordLoginClient(httpClient = sessionClient, userAgent = iosUserAgent()),
             )
         }
+        val cacheStore = remember { UserDefaultsKeyValueStore() }
         val jwController = remember {
-            JwNoticeController(JwNoticeGateway(httpClient = sessionClient, userAgent = iosUserAgent()))
+            JwNoticeController(
+                gateway = JwNoticeGateway(httpClient = sessionClient, userAgent = iosUserAgent()),
+                cache = JwNoticeSnapshotStore(cacheStore),
+            )
         }
         val campusNetController = remember {
-            CampusNetController(CampusNetGateway(httpClient = sessionClient, userAgent = iosUserAgent()))
+            CampusNetController(
+                gateway = CampusNetGateway(httpClient = sessionClient, userAgent = iosUserAgent()),
+                cache = CampusNetSnapshotStore(cacheStore),
+            )
         }
         val scope = rememberCoroutineScope()
         val loginState by loginController.state.collectAsState()
@@ -92,9 +102,14 @@ fun App() {
 
         LaunchedEffect(section, loggedInUsername) {
             when {
-                section == HomeSection.JwNotices && loggedInUsername != null -> jwController.refresh()
-                section == HomeSection.CampusNet && loggedInUsername != null ->
+                section == HomeSection.JwNotices && loggedInUsername != null -> {
+                    if (jwController.lastSnapshot() == null) jwController.restoreFromCache()
+                    jwController.refresh()
+                }
+                section == HomeSection.CampusNet && loggedInUsername != null -> {
+                    if (campusNetController.lastSnapshot() == null) campusNetController.restoreFromCache()
                     campusNetController.refresh(loggedInUsername)
+                }
             }
         }
 

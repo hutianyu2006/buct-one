@@ -3,6 +3,7 @@ package com.buct.one.data.source.jwnotice
 import com.buct.one.data.model.JwAnnouncementDetail
 import com.buct.one.data.model.JwAnnouncementItem
 import com.buct.one.data.model.JwNoticeSnapshot
+import com.buct.one.data.store.JwNoticeSnapshotStore
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -21,7 +22,10 @@ sealed interface JwNoticeUiState {
  * 教务消息状态机：把 [JwNoticeGateway] 的结果映射成 UI 状态。
  * 数据层铁律：失败只改状态，不清空已有数据（界面保留上次快照）。
  */
-class JwNoticeController(private val gateway: JwNoticeGateway) {
+class JwNoticeController(
+    private val gateway: JwNoticeGateway,
+    private val cache: JwNoticeSnapshotStore? = null,
+) {
 
     private val _state = MutableStateFlow<JwNoticeUiState>(JwNoticeUiState.Idle)
     val state: StateFlow<JwNoticeUiState> = _state.asStateFlow()
@@ -33,6 +37,7 @@ class JwNoticeController(private val gateway: JwNoticeGateway) {
         _state.value = try {
             val snapshot = gateway.fetchFullSnapshot()
             lastLoaded = snapshot
+            cache?.save(snapshot)
             JwNoticeUiState.Loaded(snapshot)
         } catch (expired: JwAuthExpiredException) {
             JwNoticeUiState.AuthExpired(expired.message ?: "教务会话已失效，请重新登录")
@@ -44,6 +49,16 @@ class JwNoticeController(private val gateway: JwNoticeGateway) {
     }
 
     fun lastSnapshot(): JwNoticeSnapshot? = lastLoaded
+
+    /** 冷启动先用缓存渲染（不产生网络请求）；返回是否命中缓存。 */
+    fun restoreFromCache(): Boolean {
+        val cached = cache?.load() ?: return false
+        lastLoaded = cached
+        if (_state.value !is JwNoticeUiState.Loaded) {
+            _state.value = JwNoticeUiState.Loaded(cached)
+        }
+        return true
+    }
 
     suspend fun fetchDetail(item: JwAnnouncementItem): Result<JwAnnouncementDetail> =
         try {
