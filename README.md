@@ -11,7 +11,7 @@
 [![Android 7.0+](https://img.shields.io/badge/Android-7.0%2B-34a853?style=flat-square&logo=android&logoColor=white)](https://developer.android.com)
 [![Kotlin + Compose](https://img.shields.io/badge/UI-Kotlin%20%2B%20Compose-7c3aed?style=flat-square)](https://developer.android.com/compose)
 [![Code Check](https://img.shields.io/github/actions/workflow/status/STAR-10086/buct-one/check.yml?style=flat-square&label=code-check)](https://github.com/STAR-10086/buct-one/actions/workflows/check.yml)
-[![Build APK](https://img.shields.io/github/actions/workflow/status/STAR-10086/buct-one/build-apk.yml?style=flat-square&label=build-apk)](https://github.com/STAR-10086/buct-one/actions/workflows/build-apk.yml)
+[![Build](https://img.shields.io/github/actions/workflow/status/STAR-10086/buct-one/build.yml?style=flat-square&label=build)](https://github.com/STAR-10086/buct-one/actions/workflows/build.yml)
 [![爱发电](https://img.shields.io/badge/%E7%88%B1%E5%8F%91%E7%94%B5-%E8%B5%9E%E5%8A%A9%E6%94%AF%E6%8C%81-946CE6?style=flat-square)](https://afdian.com/a/STAR10086QAQ)
 ![QQ交流群](https://img.shields.io/badge/QQ%E4%BA%A4%E6%B5%81%E7%BE%A4-1053622526-12B7F5?style=flat-square)
 
@@ -143,13 +143,13 @@ model/    → 零任何外部 import
 
 ## 从源码构建
 
-项目已配置全云端 CI（推送 `main` 或发起 PR 自动运行 `code-check` 与 `build-apk`；推送 `v*` 标签自动运行 `release-apk`）。如需本地调试，请准备 **JDK 21**、`compileSdk android-37.0` 与 `build-tools 37.0.0`：
+项目已配置全云端 CI（推送 `main` 或发起 PR 自动运行 `code-check` 与 `build`（`apk` / `ipa` 两个 job）；推送 `v*` 标签自动运行 `release-apk`）。如需本地调试，请准备 **JDK 21**、`compileSdk android-37.0` 与 `build-tools 37.0.0`：
 
 ```bash
 ./gradlew assembleRelease
 ```
 
-iOS 预览版（`shared/` + `iosApp/`）需要 macOS + Xcode 与 JDK 21，模拟器构建由 `ios-build` 工作流自动完成；本机可这样验证：
+iOS 预览版（`shared/` + `iosApp/`）需要 macOS + Xcode 与 JDK 21，模拟器构建由 `build` 工作流中的 `ipa` job 自动完成；本机可这样验证：
 
 ```bash
 ./gradlew :shared:jvmTest                               # 共享逻辑单测（解析器 / 模型，Ubuntu CI 亦执行）
@@ -201,7 +201,7 @@ shared/src/commonMain/  双端共享逻辑：数据模型（data/model）、响�
 shared/src/iosMain/     iOS 专属：Compose Multiplatform UI、Darwin 网络、平台入口（MainViewController）
 iosApp/                 iOS 宿主工程（SwiftUI 壳 + Xcode 工程，加载 :shared 的 Shared.framework）
 docs/                 路线规划（规划.md）与正式发布签名配置（签名接入.md）
-.github/workflows/    GitHub Actions 静态门禁（check.yml）、APK 构建（build-apk.yml）、iOS 构建（ios.yml）与标签发版（release-apk.yml）
+.github/workflows/    GitHub Actions 静态门禁（check.yml）、构建工作流（build.yml：apk / ipa 两个 job）与标签发版（release-apk.yml）
 NOTICE                上游开源工程溯源与许可声明
 LICENSE               GNU General Public License v3.0
 ```
