@@ -38,6 +38,8 @@ kotlin {
         }
         commonTest.dependencies {
             implementation(kotlin("test"))
+            implementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
+            implementation("io.ktor:ktor-client-mock:3.6.1")
         }
         // Compose 编译器插件对整个模块生效（iOS UI 需要），这里给 JVM 编译补一个仅编译期的
         // Compose Runtime，满足插件检查且不会把桌面 Compose 带进 Android 运行时依赖。
