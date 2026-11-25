@@ -40,6 +40,7 @@ kotlin {
         // Compose Runtime，满足插件检查且不会把桌面 Compose 带进 Android 运行时依赖。
         jvmMain.dependencies {
             compileOnly("org.jetbrains.compose.runtime:runtime:$composeVersion")
+            implementation("io.ktor:ktor-client-okhttp:3.6.1")
         }
         jvmTest.dependencies {
             compileOnly("org.jetbrains.compose.runtime:runtime:$composeVersion")

@@ -1,27 +1,23 @@
 package com.buct.one.data.source.card
 
-import android.util.Base64
+import com.buct.one.data.json.JSONArray
+import com.buct.one.data.json.JSONObject
 import com.buct.one.data.model.CardAccountInfo
 import com.buct.one.data.model.CardTransaction
 import com.buct.one.data.model.maskCardId
-import org.json.JSONArray
-import org.json.JSONObject
-import java.io.IOException
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
-import javax.crypto.Cipher
-import javax.crypto.spec.IvParameterSpec
-import javax.crypto.spec.SecretKeySpec
+import com.buct.one.data.text.formatDateTime
+import com.buct.one.data.text.parseDateTime
+import com.buct.one.platform.crypto.BuiltinCrypto
+import com.buct.one.platform.crypto.base64Decode
 
 /**
  * 新中新校园卡查询平台（ecard.buct.edu.cn）响应解密与数据解析器。
  */
-internal object EcardParser {
+object EcardParser {
     const val PARSER_VERSION = 2
 
-    private val RESULT_AES_KEY = "abcdef0123456789".toByteArray(Charsets.ISO_8859_1)
-    private val RESULT_AES_IV = "0123456789abcdef".toByteArray(Charsets.ISO_8859_1)
+    private val RESULT_AES_KEY = "abcdef0123456789".toByteArray(Charsets.UTF_8)
+    private val RESULT_AES_IV = "0123456789abcdef".toByteArray(Charsets.UTF_8)
 
     private val PUBLIC_KEY_REGEX = Regex("""rasPublicKey['"]\s*,\s*['"]([^'"]+)['"]""")
 
@@ -39,17 +35,11 @@ internal object EcardParser {
         if (trimmed.startsWith("{") || trimmed.startsWith("[")) return trimmed
 
         val cipherBytes = try {
-            Base64.decode(trimmed, Base64.DEFAULT)
+            base64Decode(trimmed)
         } catch (e: IllegalArgumentException) {
-            throw IOException("校园卡响应数据格式异常", e)
+            throw IllegalArgumentException("校园卡响应数据格式异常", e)
         }
-        val cipher = Cipher.getInstance("AES/CBC/NoPadding")
-        cipher.init(
-            Cipher.DECRYPT_MODE,
-            SecretKeySpec(RESULT_AES_KEY, "AES"),
-            IvParameterSpec(RESULT_AES_IV)
-        )
-        val plainBytes = cipher.doFinal(cipherBytes)
+        val plainBytes = BuiltinCrypto.aesCbcDecrypt(cipherBytes, RESULT_AES_KEY, RESULT_AES_IV)
         var end = plainBytes.size
         while (end > 0 && plainBytes[end - 1] == 0.toByte()) {
             end--
@@ -76,10 +66,10 @@ internal object EcardParser {
         val root = try {
             JSONObject(decryptedJson)
         } catch (e: Exception) {
-            throw IOException("解析校园卡账户 JSON 失败", e)
+            throw IllegalArgumentException("解析校园卡账户 JSON 失败", e)
         }
         val accountObj = root.optJSONObject("accountinfo")
-            ?: throw IOException("未获取到校园卡账户信息")
+            ?: throw IllegalArgumentException("未获取到校园卡账户信息")
         val userObj = accountObj.optJSONObject("cardUserinfo")
 
         val username = userObj?.optString("username", "").orEmpty().trim()
@@ -99,10 +89,8 @@ internal object EcardParser {
                 if (single.has("accstatus") || single.has("cardtype")) {
                     cards.add(single)
                 } else {
-                    val keys = single.keys()
-                    while (keys.hasNext()) {
-                        val k = keys.next()
-                        single.optJSONObject(k)?.let { cards.add(it) }
+                    for (key in single.keys()) {
+                        single.optJSONObject(key)?.let { cards.add(it) }
                     }
                 }
             }
@@ -205,7 +193,7 @@ internal object EcardParser {
 
     fun mapErrorMessage(codeOrMsg: String): String {
         val raw = codeOrMsg.trim()
-        return when (raw.uppercase(Locale.ROOT)) {
+        return when (raw.uppercase()) {
             "CORE20003", "WEB10001" -> "校园卡密码错误（默认身份证后六位，有字母用 1 代替）"
             "CORE20004", "WEB20001", "WEB20002" -> "未找到该学工号对应的校园卡账户"
             "CORE21120" -> "登录失败次数过多，请稍后再试"
@@ -224,27 +212,24 @@ internal object EcardParser {
         }
     }
 
-    private fun parseTxDate(raw: Any?): Pair<Long, String> {
-        val fmt = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.CHINA)
-        return when (raw) {
-            is Number -> {
-                val ms = raw.toLong()
-                ms to if (ms > 0L) fmt.format(Date(ms)) else "-"
-            }
-            is String -> {
-                val trimmed = raw.trim()
-                val asLong = trimmed.toLongOrNull()
-                if (asLong != null) {
-                    asLong to if (asLong > 0L) fmt.format(Date(asLong)) else "-"
-                } else if (trimmed.isNotBlank()) {
-                    val parsedMs = runCatching { fmt.parse(trimmed)?.time }.getOrNull() ?: 0L
-                    parsedMs to trimmed
-                } else {
-                    0L to "-"
-                }
-            }
-            else -> 0L to "-"
+    private fun parseTxDate(raw: Any?): Pair<Long, String> = when (raw) {
+        is Number -> {
+            val ms = raw.toLong()
+            ms to if (ms > 0L) formatDateTime(ms) else "-"
         }
+        is String -> {
+            val trimmed = raw.trim()
+            val asLong = trimmed.toLongOrNull()
+            when {
+                asLong != null -> asLong to if (asLong > 0L) formatDateTime(asLong) else "-"
+                trimmed.isNotBlank() -> {
+                    val parsedMs = parseDateTime(trimmed) ?: 0L
+                    parsedMs to trimmed
+                }
+                else -> 0L to "-"
+            }
+        }
+        else -> 0L to "-"
     }
 
     private fun optLongFlexible(obj: JSONObject?, key: String): Long {
