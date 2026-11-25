@@ -3,6 +3,7 @@ package com.buct.one.data.source.electricity
 import com.buct.one.data.model.ElectricityReading
 import com.buct.one.data.model.ElectricityRoomTarget
 import com.buct.one.platform.crypto.BuiltinCrypto
+import com.buct.one.platform.crypto.sha256Hex
 import com.buct.one.shared.nowMillis
 import io.ktor.client.HttpClient
 import io.ktor.client.request.get
