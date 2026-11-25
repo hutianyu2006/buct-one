@@ -10,6 +10,22 @@ import io.ktor.client.engine.okhttp.OkHttp
  */
 object AndroidHttpClients {
 
+    /** 登录/会话客户端：关闭自动重定向以便观察 CAS 的 302 与 Set-Cookie，Cookie 走内存存储。 */
+    val session: HttpClient by lazy {
+        val trustManager = BuctTlsTrustManager()
+        buildHttpClient(
+            OkHttp.create {
+                config {
+                    sslSocketFactory(trustManager.sslSocketFactory(), trustManager)
+                    dns(BuctDns)
+                    followRedirects(false)
+                }
+            },
+            followRedirects = false,
+            cookieStore = com.buct.one.platform.session.InMemoryCookieStore(),
+        )
+    }
+
     val shared: HttpClient by lazy {
         val trustManager = BuctTlsTrustManager()
         buildHttpClient(

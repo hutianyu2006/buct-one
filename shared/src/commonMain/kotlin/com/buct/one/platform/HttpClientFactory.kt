@@ -3,6 +3,8 @@ package com.buct.one.platform
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.HttpClientEngine
 import io.ktor.client.plugins.HttpTimeout
+import com.buct.one.platform.session.CookieStore
+import com.buct.one.platform.session.CookieStoreCookiesStorage
 import io.ktor.client.plugins.cookies.AcceptAllCookiesStorage
 import io.ktor.client.plugins.cookies.HttpCookies
 
@@ -22,6 +24,7 @@ fun buildHttpClient(
     socketTimeoutMillis: Long = 15_000,
     followRedirects: Boolean = true,
     keepCookies: Boolean = true,
+    cookieStore: CookieStore? = null,
 ): HttpClient = HttpClient(engine) {
     this.followRedirects = followRedirects
     install(HttpTimeout) {
@@ -29,7 +32,11 @@ fun buildHttpClient(
         this.connectTimeoutMillis = connectTimeoutMillis
         this.socketTimeoutMillis = socketTimeoutMillis
     }
-    if (keepCookies) {
+    if (cookieStore != null) {
+        install(HttpCookies) {
+            storage = CookieStoreCookiesStorage(cookieStore)
+        }
+    } else if (keepCookies) {
         install(HttpCookies) {
             storage = AcceptAllCookiesStorage()
         }
