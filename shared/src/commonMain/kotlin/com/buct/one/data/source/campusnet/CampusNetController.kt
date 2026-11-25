@@ -37,8 +37,9 @@ class CampusNetController(
 
     /** 冷启动先用缓存渲染（不产生网络请求）；返回是否命中缓存。 */
     fun restoreFromCache(): Boolean {
-        val cached = cache?.load() ?: return false
-        val slice = sync.restoreFromCache(cached, cache.capturedAt())
+        val store = cache ?: return false
+        val cached = store.load() ?: return false
+        val slice = sync.restoreFromCache(cached, store.capturedAt())
         if (_state.value !is CampusNetUiState.Loaded) {
             _state.value = CampusNetUiState.Loaded(cached, slice.provenance)
         }
