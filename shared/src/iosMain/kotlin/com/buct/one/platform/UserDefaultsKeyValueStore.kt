@@ -4,14 +4,11 @@ import platform.Foundation.NSUserDefaults
 
 /**
  * iOS 侧 [KeyValueStore] 实现：落在 NSUserDefaults（与 Android SharedPreferences 语义最接近）。
- * 敏感凭据（密码 / Cookie）不落这里，沿用 Android 侧「凭据不落盘」的约定，只放非敏感状态。
+ * 敏感凭据（密码 / Cookie）不落这里，沿用「凭据不落盘」的约定，只放非敏感状态。
  */
-class UserDefaultsKeyValueStore(
-    private val suiteName: String? = null,
-) : KeyValueStore {
+class UserDefaultsKeyValueStore : KeyValueStore {
 
-    private val defaults: NSUserDefaults =
-        if (suiteName == null) NSUserDefaults.standardUserDefaults else NSUserDefaults(suiteName = suiteName)
+    private val defaults: NSUserDefaults = NSUserDefaults.standardUserDefaults
 
     override fun getString(key: String): String? = defaults.stringForKey(key)
 

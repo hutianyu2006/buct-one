@@ -16,8 +16,8 @@ import com.buct.one.platform.crypto.base64Decode
 object EcardParser {
     const val PARSER_VERSION = 3
 
-    private val RESULT_AES_KEY = "abcdef0123456789".toByteArray(Charsets.UTF_8)
-    private val RESULT_AES_IV = "0123456789abcdef".toByteArray(Charsets.UTF_8)
+    private val RESULT_AES_KEY = "abcdef0123456789".encodeToByteArray()
+    private val RESULT_AES_IV = "0123456789abcdef".encodeToByteArray()
 
     private val PUBLIC_KEY_REGEX = Regex("""rasPublicKey['"]\s*,\s*['"]([^'"]+)['"]""")
 
@@ -44,7 +44,7 @@ object EcardParser {
         while (end > 0 && plainBytes[end - 1] == 0.toByte()) {
             end--
         }
-        return String(plainBytes, 0, end, Charsets.UTF_8).trim()
+        return plainBytes.copyOfRange(0, end).decodeToString().trim()
     }
 
     fun parseAcctypeMap(root: JSONObject): Map<String, String> {
