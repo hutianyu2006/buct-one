@@ -1,0 +1,65 @@
+package com.buct.one.data.source.jwnotice
+
+import com.buct.one.platform.buildHttpClient
+import io.ktor.client.engine.mock.MockEngine
+import io.ktor.client.engine.mock.respond
+import io.ktor.http.ContentType
+import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpStatusCode
+import io.ktor.http.headersOf
+import kotlinx.coroutines.test.runTest
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
+
+class JwNoticeControllerTest {
+
+    private val remindersJson =
+        """{"totalResult":"1","items":[{"xxbt":"停课提醒","xxnr":"周三停课","cjsj":"2026-11-20 10:00"}]}"""
+    private val announcementsJson =
+        """{"totalResult":"1","items":[{"xwbh":"1","xwbt":"选课通知","fbr":"教务处","fbsj":"2026-11-19"}]}"""
+
+    private fun controller(
+        reminders: String = remindersJson,
+        announcements: String = announcementsJson,
+    ): JwNoticeController {
+        val engine = MockEngine { request ->
+            val body = if (request.url.encodedPath.contains("cxDbsy")) reminders else announcements
+            respond(body, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
+        }
+        return JwNoticeController(JwNoticeGateway(buildHttpClient(engine), userAgent = "test-UA"))
+    }
+
+    @Test
+    fun refresh_loadsSnapshot() = runTest {
+        val controller = controller()
+        controller.refresh()
+        val state = controller.state.value
+        assertTrue(state is JwNoticeUiState.Loaded)
+        val snapshot = (state as JwNoticeUiState.Loaded).snapshot
+        assertEquals(1, snapshot.reminders.size)
+        assertEquals(1, snapshot.announcements.size)
+        assertEquals("停课提醒", snapshot.reminders[0].title)
+    }
+
+    @Test
+    fun refresh_authExpired() = runTest {
+        val controller = controller(reminders = "<html><body><p id=\"login-page-flowkey\">x</p></body></html>")
+        controller.refresh()
+        assertTrue(controller.state.value is JwNoticeUiState.AuthExpired)
+    }
+
+    @Test
+    fun refresh_networkFailureKeepsPreviousSnapshotAvailable() = runTest {
+        val controller = controller()
+        controller.refresh()
+        assertTrue(controller.lastSnapshot() != null)
+
+        // 之后请求全部抛异常：状态变为 Failed，但 lastSnapshot 仍可用于界面保留旧数据
+        val failingEngine = MockEngine { error("network down") }
+        val failing = JwNoticeController(JwNoticeGateway(buildHttpClient(failingEngine), userAgent = "test-UA"))
+        failing.refresh()
+        assertTrue(failing.state.value is JwNoticeUiState.Failed)
+        assertEquals(null, failing.lastSnapshot())
+    }
+}

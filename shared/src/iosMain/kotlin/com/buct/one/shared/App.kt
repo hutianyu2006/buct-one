@@ -1,10 +1,14 @@
 package com.buct.one.shared
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -18,11 +22,14 @@ import androidx.compose.ui.Modifier
 import com.buct.one.data.login.CasLoginController
 import com.buct.one.data.login.CasPasswordLoginClient
 import com.buct.one.data.login.LoginState
+import com.buct.one.data.source.jwnotice.JwNoticeController
+import com.buct.one.data.source.jwnotice.JwNoticeGateway
 import com.buct.one.platform.createIosSessionClient
 import com.buct.one.shared.notice.AppNotice
 import com.buct.one.shared.notice.NoticeRepository
 import com.buct.one.shared.ui.BuctOneTheme
 import com.buct.one.shared.ui.HomeScreen
+import com.buct.one.shared.ui.JwNoticeScreen
 import com.buct.one.shared.ui.LoginScreen
 import com.buct.one.shared.ui.NoticeDetailScreen
 import kotlinx.coroutines.CancellationException
@@ -34,6 +41,8 @@ internal sealed interface NoticeUiState {
     data class Failed(val message: String) : NoticeUiState
 }
 
+private enum class HomeSection { Notices, JwNotices }
+
 /** iOS 端的 Compose 根节点，被 MainViewController 直接嵌入 UIViewController。 */
 @Composable
 fun App() {
@@ -42,21 +51,25 @@ fun App() {
         DisposableEffect(repository) {
             onDispose { repository.close() }
         }
+
+        val sessionClient = remember { createIosSessionClient() }
         val loginController = remember {
             CasLoginController(
-                CasPasswordLoginClient(
-                    httpClient = createIosSessionClient(),
-                    userAgent = iosUserAgent(),
-                ),
+                CasPasswordLoginClient(httpClient = sessionClient, userAgent = iosUserAgent()),
             )
+        }
+        val jwController = remember {
+            JwNoticeController(JwNoticeGateway(httpClient = sessionClient, userAgent = iosUserAgent()))
         }
         val scope = rememberCoroutineScope()
         val loginState by loginController.state.collectAsState()
+        val jwState by jwController.state.collectAsState()
 
         var state by remember { mutableStateOf<NoticeUiState>(NoticeUiState.Loading) }
         var reloadKey by remember { mutableStateOf(0) }
         var selected by remember { mutableStateOf<AppNotice?>(null) }
         var skippedLogin by remember { mutableStateOf(false) }
+        var section by remember { mutableStateOf(HomeSection.Notices) }
         val loggedInUsername = (loginState as? LoginState.Success)?.username
 
         LaunchedEffect(reloadKey) {
@@ -70,32 +83,70 @@ fun App() {
             }
         }
 
+        LaunchedEffect(section, loggedInUsername) {
+            if (section == HomeSection.JwNotices && loggedInUsername != null) {
+                jwController.refresh()
+            }
+        }
+
         Scaffold(containerColor = MaterialTheme.colorScheme.background) { innerPadding ->
-            Box(
+            Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(innerPadding),
             ) {
-                val notice = selected
-                when {
-                    notice != null -> NoticeDetailScreen(notice = notice, onBack = { selected = null })
-                    loggedInUsername != null || skippedLogin -> HomeScreen(
-                        state = state,
-                        onRefresh = { reloadKey += 1 },
-                        onSelect = { selected = it },
-                        sessionUsername = loggedInUsername,
-                        onLogout = {
-                            loginController.reset()
-                            skippedLogin = false
-                        },
-                    )
-                    else -> LoginScreen(
-                        state = loginState,
-                        onSubmit = { username, password ->
-                            scope.launch { loginController.login(username, password) }
-                        },
-                        onSkip = { skippedLogin = true },
-                    )
+                if (loggedInUsername != null) {
+                    TabRow(
+                        selectedTabIndex = if (section == HomeSection.Notices) 0 else 1,
+                        containerColor = MaterialTheme.colorScheme.background,
+                    ) {
+                        Tab(
+                            selected = section == HomeSection.Notices,
+                            onClick = { section = HomeSection.Notices },
+                            text = { Text("公告") },
+                        )
+                        Tab(
+                            selected = section == HomeSection.JwNotices,
+                            onClick = { section = HomeSection.JwNotices },
+                            text = { Text("教务消息") },
+                        )
+                    }
+                }
+
+                Box(modifier = Modifier.weight(1f)) {
+                    val notice = selected
+                    when {
+                        notice != null -> NoticeDetailScreen(notice = notice, onBack = { selected = null })
+                        loggedInUsername != null || skippedLogin -> {
+                            if (section == HomeSection.JwNotices && loggedInUsername != null) {
+                                JwNoticeScreen(
+                                    state = jwState,
+                                    onRefresh = { scope.launch { jwController.refresh() } },
+                                    loadDetail = { item -> jwController.fetchDetail(item) },
+                                )
+                            } else {
+                                HomeScreen(
+                                    state = state,
+                                    onRefresh = { reloadKey += 1 },
+                                    onSelect = { selected = it },
+                                    sessionUsername = loggedInUsername,
+                                    onLogout = {
+                                        loginController.reset()
+                                        jwController.reset()
+                                        section = HomeSection.Notices
+                                        skippedLogin = false
+                                    },
+                                )
+                            }
+                        }
+                        else -> LoginScreen(
+                            state = loginState,
+                            onSubmit = { username, password ->
+                                scope.launch { loginController.login(username, password) }
+                            },
+                            onSkip = { skippedLogin = true },
+                        )
+                    }
                 }
             }
         }
