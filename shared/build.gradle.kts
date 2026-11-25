@@ -31,7 +31,8 @@ kotlin {
             implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.13.0")
             implementation("io.ktor:ktor-client-core:3.6.1")
             // jsoup 的 Kotlin Multiplatform 移植版，解析层双端复用
-            implementation("com.fleeksoft.ksoup:ksoup:0.2.6")
+            // 解析器公共签名暴露 Ksoup 类型，需要 api 而不是 implementation
+            api("com.fleeksoft.ksoup:ksoup:0.2.6")
         }
         commonTest.dependencies {
             implementation(kotlin("test"))

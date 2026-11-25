@@ -12,6 +12,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
 import java.security.KeyFactory
@@ -173,7 +174,7 @@ internal class EcardClient {
         val body = JSONObject().put("names", "acctype").toString()
         val root = postJson("/business/queryCommon", body, throwAuthOnFail = false)
         if (root.optBoolean("success", false)) {
-            EcardParser.parseAcctypeMap(root)
+            EcardParser.parseAcctypeMap(root.toSharedJson())
         } else {
             emptyMap()
         }
@@ -373,3 +374,11 @@ internal class EcardClient {
         return latest
     }
 }
+
+
+/** :shared 解析器使用自己的 JSON 外观，这里做一次轻量适配，避免大范围改写客户端。 */
+private fun JSONObject.toSharedJson(): com.buct.one.data.json.JSONObject =
+    com.buct.one.data.json.JSONObject(toString())
+
+private fun JSONArray.toSharedJsonArray(): com.buct.one.data.json.JSONArray =
+    com.buct.one.data.json.JSONArray(toString())

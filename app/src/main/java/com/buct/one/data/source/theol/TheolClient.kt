@@ -25,7 +25,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import org.json.JSONObject
-import org.jsoup.Jsoup
+import com.fleeksoft.ksoup.Ksoup
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
@@ -766,7 +766,7 @@ class TheolClient {
 
     private fun extractJsAlertMessage(html: String): String? {
         val alertRegex = Regex("""alert\s*\(\s*['"]([^'"]+)['"]\s*\)""")
-        val doc = Jsoup.parse(html)
+        val doc = Ksoup.parse(html)
         for (script in doc.select("script:not([src])")) {
             val msg = alertRegex.find(script.data())?.groupValues?.getOrNull(1)?.trim().orEmpty()
             if (msg.isNotBlank() && !msg.contains("只有注册用户才可以提交错误报告")) {
@@ -1151,14 +1151,14 @@ class TheolClient {
         }
 
         val courseHtml = ensureActiveCourseHtml()
-        val homeDoc = Jsoup.parse(courseHtml, courseHomeUrl)
+        val homeDoc = Ksoup.parse(courseHtml, courseHomeUrl)
         val candidates = linkedSetOf<String>()
         candidates.addAll(TheolParser.discoverResourceEntryUrls(homeDoc, courseHomeUrl))
 
         for (frame in homeDoc.select("frame[src], iframe[src]")) {
             val frameUrl = normalizeUrl(courseHomeUrl, frame.attr("src")) ?: continue
             val frameHtml = runCatching { fetchHtml(frameUrl, courseHomeUrl) }.getOrNull() ?: continue
-            val frameDoc = Jsoup.parse(frameHtml, frameUrl)
+            val frameDoc = Ksoup.parse(frameHtml, frameUrl)
             candidates.addAll(TheolParser.discoverResourceEntryUrls(frameDoc, frameUrl))
         }
 
@@ -1219,7 +1219,7 @@ class TheolClient {
             if (parsed.items.isNotEmpty()) {
                 return parsed
             }
-            val doc = Jsoup.parse(html, currentUrl)
+            val doc = Ksoup.parse(html, currentUrl)
             val nextUrl = TheolParser.extractResourceRedirectUrl(doc, currentUrl)
             if (nextUrl.isNullOrBlank() || !visited.add(nextUrl)) {
                 break
@@ -1283,7 +1283,7 @@ class TheolClient {
                 }
 
                 // 单次 Jsoup 解析同时供作业抽取与子栏目发现使用，避免重复 parse
-                val doc = Jsoup.parse(html, current.url)
+                val doc = Ksoup.parse(html, current.url)
                 for (hw in TheolParser.parseHomeworkPage(doc, current.url, lid, courseName, nowMillis)) {
                     if (seenIds.add(hw.hwtid)) found.add(hw)
                 }
