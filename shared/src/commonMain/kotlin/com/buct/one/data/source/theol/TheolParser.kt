@@ -510,7 +510,7 @@ object TheolParser {
                 val label = a.text().trim().ifEmpty {
                     resolved.substringAfterLast('/').substringBefore('?').ifEmpty { "附件" }
                 }
-                attachments.putIfAbsent(resolved, TheolHomeworkAttachment(name = label, url = resolved))
+                attachments.getOrPut(resolved) { TheolHomeworkAttachment(name = label, url = resolved) }
             }
         }
 
@@ -926,7 +926,7 @@ object TheolParser {
             } else {
                 for (link in doc.select("a[href]")) {
                     val item = parseResourceElement(link, null, pageUrl, knownExts, ignoredTexts, null) ?: continue
-                    items.putIfAbsent(item.url, item)
+                    items.getOrPut(item.url) { item }
                 }
             }
         }
