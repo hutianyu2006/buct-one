@@ -94,6 +94,3 @@ class CookieStoreTest {
         assertTrue(cookieStore.load().any { it.name == "SESSION" && it.value == "logged-in" })
     }
 }
-
-private suspend fun io.ktor.client.statement.HttpResponse.bodyAsText(): String =
-    io.ktor.client.statement.bodyAsText(this)
