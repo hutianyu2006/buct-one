@@ -47,6 +47,8 @@ internal fun HomeScreen(
     state: NoticeUiState,
     onRefresh: () -> Unit,
     onSelect: (AppNotice) -> Unit,
+    sessionUsername: String? = null,
+    onLogout: (() -> Unit)? = null,
 ) {
     val colors = MaterialTheme.colorScheme
     Column(modifier = Modifier.fillMaxSize()) {
@@ -121,7 +123,7 @@ internal fun HomeScreen(
                     }
                 }
             }
-            item { AboutCard() }
+            item { AboutCard(sessionUsername = sessionUsername, onLogout = onLogout) }
         }
     }
 }
@@ -225,7 +227,7 @@ private fun ErrorCard(message: String, onRetry: () -> Unit) {
 }
 
 @Composable
-private fun AboutCard() {
+private fun AboutCard(sessionUsername: String?, onLogout: (() -> Unit)?) {
     val colors = MaterialTheme.colorScheme
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -242,7 +244,23 @@ private fun AboutCard() {
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                text = "当前版本仅接通「公告」通道；教务、课表、校园卡、宿舍电费等模块仍以 Android 版为准，" +
+                text = if (sessionUsername != null) {
+                    "会话：已登录 $sessionUsername（Cookie 仅保存在内存，不落盘）"
+                } else {
+                    "会话：未登录（仅公告可用）"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = if (sessionUsername != null) colors.primary else colors.onSurfaceVariant,
+            )
+            if (sessionUsername != null && onLogout != null) {
+                Spacer(Modifier.height(4.dp))
+                TextButton(onClick = onLogout) {
+                    Text("退出登录")
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = "当前版本接通「公告」与「统一身份认证登录」；教务、课表、校园卡、宿舍电费等模块仍以 Android 版为准，" +
                     "会按计划逐步迁移到 Kotlin Multiplatform 共享层。",
                 style = MaterialTheme.typography.bodySmall,
                 color = colors.onSurfaceVariant,

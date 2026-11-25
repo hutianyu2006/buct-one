@@ -22,6 +22,11 @@ internal fun createDarwinHttpClient(): HttpClient = HttpClient(Darwin) {
 /** 平台名称，仅用于「关于」页展示。 */
 internal fun platformLabel(): String = "iOS"
 
+/** 登录/网关请求使用的 iOS User-Agent（与 Android 侧格式对齐，便于服务端日志区分）。 */
+internal fun iosUserAgent(): String =
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 " +
+        "(KHTML, like Gecko) Mobile/15E148 BuctOne-iOS/" + AppInfo.VERSION
+
 /** 打开外部链接（GitHub 仓库等）。 */
 internal fun openUrl(url: String) {
     val target = NSURL.URLWithString(url) ?: return
