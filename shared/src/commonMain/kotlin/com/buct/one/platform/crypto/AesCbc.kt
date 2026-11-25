@@ -29,6 +29,88 @@ internal object AesCbc {
         return output
     }
 
+    /** AES-ECB + PKCS7（校方统一认证 CryptoJS 的等价实现）。 */
+    fun encryptEcbPkcs7(plainBytes: ByteArray, key: ByteArray): ByteArray {
+        val roundKeys = expandKey(key)
+        val rounds = roundKeys.size / 4 - 1
+        val padded = pkcs7Pad(plainBytes)
+        val output = ByteArray(padded.size)
+        for (offset in padded.indices step BLOCK_SIZE) {
+            val block = encryptBlock(padded.copyOfRange(offset, offset + BLOCK_SIZE), roundKeys, rounds)
+            block.copyInto(output, offset)
+        }
+        return output
+    }
+
+    fun decryptEcbPkcs7(cipherBytes: ByteArray, key: ByteArray): ByteArray {
+        require(cipherBytes.size % BLOCK_SIZE == 0) { "AES-ECB 密文长度必须是 16 的整数倍" }
+        val roundKeys = expandKey(key)
+        val rounds = roundKeys.size / 4 - 1
+        val output = ByteArray(cipherBytes.size)
+        for (offset in cipherBytes.indices step BLOCK_SIZE) {
+            val block = decryptBlock(cipherBytes.copyOfRange(offset, offset + BLOCK_SIZE), roundKeys, rounds)
+            block.copyInto(output, offset)
+        }
+        return pkcs7Unpad(output)
+    }
+
+    private fun pkcs7Pad(data: ByteArray): ByteArray {
+        val pad = BLOCK_SIZE - data.size % BLOCK_SIZE
+        val padded = ByteArray(data.size + pad)
+        data.copyInto(padded)
+        for (i in data.size until padded.size) padded[i] = pad.toByte()
+        return padded
+    }
+
+    private fun pkcs7Unpad(data: ByteArray): ByteArray {
+        require(data.isNotEmpty()) { "AES-ECB 明文为空" }
+        val pad = data[data.size - 1].toInt() and 0xFF
+        require(pad in 1..BLOCK_SIZE && pad <= data.size) { "PKCS7 填充非法" }
+        return data.copyOf(data.size - pad)
+    }
+
+    private fun encryptBlock(input: ByteArray, roundKeys: IntArray, rounds: Int): ByteArray {
+        val state = IntArray(16) { input[it].toInt() and 0xFF }
+        addRoundKey(state, roundKeys, 0)
+        for (round in 1 until rounds) {
+            subBytes(state)
+            shiftRows(state)
+            mixColumns(state)
+            addRoundKey(state, roundKeys, round)
+        }
+        subBytes(state)
+        shiftRows(state)
+        addRoundKey(state, roundKeys, rounds)
+        return ByteArray(16) { state[it].toByte() }
+    }
+
+    private fun subBytes(state: IntArray) {
+        for (i in 0 until 16) state[i] = sBox[state[i]]
+    }
+
+    private fun shiftRows(state: IntArray) {
+        // 状态按列存储：state[column * 4 + row]
+        for (row in 1 until 4) {
+            val a = IntArray(4)
+            for (column in 0 until 4) a[column] = state[column * 4 + row]
+            for (column in 0 until 4) state[column * 4 + row] = a[(column + row) % 4]
+        }
+    }
+
+    private fun mixColumns(state: IntArray) {
+        for (column in 0 until 4) {
+            val offset = column * 4
+            val a0 = state[offset]
+            val a1 = state[offset + 1]
+            val a2 = state[offset + 2]
+            val a3 = state[offset + 3]
+            state[offset] = mul(a0, 2) xor mul(a1, 3) xor a2 xor a3
+            state[offset + 1] = a0 xor mul(a1, 2) xor mul(a2, 3) xor a3
+            state[offset + 2] = a0 xor a1 xor mul(a2, 2) xor mul(a3, 3)
+            state[offset + 3] = mul(a0, 3) xor a1 xor a2 xor mul(a3, 2)
+        }
+    }
+
     private fun decryptBlock(input: ByteArray, roundKeys: IntArray, rounds: Int): ByteArray {
         val state = IntArray(16) { input[it].toInt() and 0xFF }
         addRoundKey(state, roundKeys, rounds)

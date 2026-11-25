@@ -11,6 +11,11 @@ interface AppCrypto {
     /** AES-CBC 解密（NoPadding，调用方自行处理尾部填充）。 */
     fun aesCbcDecrypt(cipherBytes: ByteArray, key: ByteArray, iv: ByteArray): ByteArray
 
+    /** AES-ECB + PKCS7（校方统一认证前端 CryptoJS.AES.encrypt 的等价实现）。 */
+    fun aesEcbEncrypt(plainBytes: ByteArray, key: ByteArray): ByteArray
+
+    fun aesEcbDecrypt(cipherBytes: ByteArray, key: ByteArray): ByteArray
+
     fun sha256(bytes: ByteArray): ByteArray
 
     fun hmacSha256(key: ByteArray, message: ByteArray): ByteArray
@@ -20,6 +25,12 @@ object BuiltinCrypto : AppCrypto {
 
     override fun aesCbcDecrypt(cipherBytes: ByteArray, key: ByteArray, iv: ByteArray): ByteArray =
         AesCbc.decrypt(cipherBytes, key, iv)
+
+    override fun aesEcbEncrypt(plainBytes: ByteArray, key: ByteArray): ByteArray =
+        AesCbc.encryptEcbPkcs7(plainBytes, key)
+
+    override fun aesEcbDecrypt(cipherBytes: ByteArray, key: ByteArray): ByteArray =
+        AesCbc.decryptEcbPkcs7(cipherBytes, key)
 
     override fun sha256(bytes: ByteArray): ByteArray = Sha256.hash(bytes)
 
