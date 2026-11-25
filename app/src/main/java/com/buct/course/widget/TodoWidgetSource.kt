@@ -62,8 +62,9 @@ internal object TodoWidgetSource {
         snapshot.tests
             .distinctBy { "${it.lid}:${it.testId}" }
             .filter { test ->
+                val endTimeMillis = test.endTimeMillis
                 !test.hasResult &&
-                    (test.endTimeMillis == null || test.endTimeMillis > nowMillis) &&
+                    (endTimeMillis == null || endTimeMillis > nowMillis) &&
                     filters?.isTestVisible(test) != false
             }
             .forEach { add(it.courseName, homework = false, deadlineMillis = it.endTimeMillis) }

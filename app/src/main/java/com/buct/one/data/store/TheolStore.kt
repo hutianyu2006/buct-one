@@ -255,9 +255,7 @@ class TheolStore(private val rootDir: File) {
                     }
                 }
             )
-            if (slice.data != null) {
-                put("data", encodeSnapshot(slice.data))
-            }
+            slice.data?.let { put("data", encodeSnapshot(it)) }
             if (slice.lastError != null) {
                 put("lastError", slice.lastError)
             }

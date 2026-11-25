@@ -239,14 +239,17 @@ object NationalFitnessScorer {
         return null
     }
 
+    /** 模型层保持零 import：数字补零与取整全部用 stdlib 全限定调用完成。 */
+    private fun padTwo(value: Int): String = if (value < 10) "0$value" else value.toString()
+
     fun formatSecondsToDot(sec: Int): String {
         val s = sec.coerceAtLeast(0)
-        return String.format(java.util.Locale.ROOT, "%d.%02d", s / 60, s % 60)
+        return "${s / 60}.${padTwo(s % 60)}"
     }
 
     fun formatSecondsToClock(sec: Int): String {
         val s = sec.coerceAtLeast(0)
-        return String.format(java.util.Locale.ROOT, "%d'%02d\"", s / 60, s % 60)
+        return "${s / 60}'${padTwo(s % 60)}\""
     }
 
     fun detectGender(genderText: String): FitnessGender =
@@ -270,11 +273,11 @@ object NationalFitnessScorer {
         fun findItem(vararg keys: String): TyglFitnessItem? =
             record.items.firstOrNull { item -> keys.any { item.name.contains(it) } }
 
-        val lungMl = findItem("肺活量")?.let { extractDouble(it.rawResult)?.let { v -> java.lang.Math.round(v).toInt() } }
+        val lungMl = findItem("肺活量")?.let { extractDouble(it.rawResult)?.let { v -> kotlin.math.round(v).toInt() } }
         val sprint50 = findItem("50米")?.let { extractDouble(it.rawResult) }
         val sitReach = findItem("体前屈")?.let { extractDouble(it.rawResult) }
-        val jumpCm = findItem("立定跳远")?.let { extractDouble(it.rawResult)?.let { v -> java.lang.Math.round(v).toInt() } }
-        val strength = findItem("引体", "仰卧起坐")?.let { extractDouble(it.rawResult)?.let { v -> java.lang.Math.round(v).toInt() } }
+        val jumpCm = findItem("立定跳远")?.let { extractDouble(it.rawResult)?.let { v -> kotlin.math.round(v).toInt() } }
+        val strength = findItem("引体", "仰卧起坐")?.let { extractDouble(it.rawResult)?.let { v -> kotlin.math.round(v).toInt() } }
         val enduranceSec = findItem("1000米", "800米")?.let { parseEnduranceToSeconds(it.rawResult) }
 
         return FitnessSimulationInput(
@@ -525,8 +528,12 @@ object NationalFitnessScorer {
         else -> "不及格"
     }
 
-    private fun round1(v: Double): Double = java.lang.Math.round(v * 10.0) / 10.0
+    private fun round1(v: Double): Double = kotlin.math.round(v * 10.0) / 10.0
 
-    private fun formatOneDecimal(v: Double): String =
-        String.format(java.util.Locale.ROOT, "%.1f", round1(v))
+    private fun formatOneDecimal(v: Double): String {
+        val scaled = kotlin.math.round(round1(v) * 10.0).toLong()
+        val whole = scaled / 10L
+        val fraction = kotlin.math.abs(scaled % 10L)
+        return "$whole.$fraction"
+    }
 }

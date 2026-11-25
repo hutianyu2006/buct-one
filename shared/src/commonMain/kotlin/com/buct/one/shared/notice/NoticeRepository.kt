@@ -1,6 +1,5 @@
 package com.buct.one.shared.notice
 
-import com.buct.one.shared.createHttpClient
 import com.buct.one.shared.nowMillis
 import com.buct.one.shared.sharedJson
 import io.ktor.client.HttpClient
@@ -13,7 +12,7 @@ import io.ktor.client.statement.bodyAsText
  * 失败只向上抛异常，不产出半成品数据，由 UI 层决定如何提示。
  */
 class NoticeRepository(
-    private val client: HttpClient = createHttpClient(),
+    private val client: HttpClient,
 ) {
     suspend fun load(): List<AppNotice> {
         val payload = client.get("$API_BASE?app=$APP_ID") {

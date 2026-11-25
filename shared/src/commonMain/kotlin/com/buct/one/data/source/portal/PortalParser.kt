@@ -7,17 +7,17 @@ import com.buct.one.data.model.PortalLibrarySnapshot
 import com.buct.one.data.model.PortalNewsArticle
 import com.buct.one.data.model.PortalNewsColumnPage
 import com.buct.one.data.model.PortalTermInfo
-import org.json.JSONArray
-import org.json.JSONObject
-import org.jsoup.Jsoup
-import java.net.URLDecoder
+import com.buct.one.data.json.JSONArray
+import com.buct.one.data.json.JSONObject
+import com.fleeksoft.ksoup.Ksoup
+import com.buct.one.data.text.urlDecode
 
 /**
  * i北化信息门户（i.buct.edu.cn & mnews.buct.edu.cn）纯函数响应解析器。
  * 遵循数据层铁律 3：改动解析逻辑必须递增 PARSER_VERSION。
  */
 object PortalParser {
-    const val PARSER_VERSION: Int = 2
+    const val PARSER_VERSION: Int = 3
 
     private val DATE_REGEX = Regex("\\d{4}-\\d{2}-\\d{2}")
 
@@ -34,7 +34,7 @@ object PortalParser {
     }
 
     fun parseSidPortalPage(html: String): SidPortalPageInfo {
-        val doc = Jsoup.parse(html)
+        val doc = Ksoup.parse(html)
         fun text(id: String): String = doc.selectFirst("#$id")?.text()?.trim().orEmpty()
         return SidPortalPageInfo(
             execution = text("login-page-flowkey"),
@@ -241,6 +241,6 @@ object PortalParser {
         if (idx < 0) return clean
         val encoded = clean.substring(idx + key.length).substringBefore('&').trim()
         if (encoded.isEmpty()) return clean
-        return runCatching { URLDecoder.decode(encoded, "UTF-8") }.getOrDefault(encoded).trim()
+        return runCatching { urlDecode(encoded) }.getOrDefault(encoded).trim()
     }
 }

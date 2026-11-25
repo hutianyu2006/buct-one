@@ -114,8 +114,7 @@ class PortalSyncService private constructor(
                 val ageMs = System.currentTimeMillis() - cached.provenance.capturedAt
                 if (!userInitiated &&
                     cached.provenance.refreshState == RefreshState.FRESH &&
-                    cached.data != null &&
-                    cached.data.beginDate.isNotBlank() &&
+                    cached.data?.beginDate?.isNotBlank() == true &&
                     ageMs in 0 until CACHE_TTL_MS
                 ) {
                     return@withLock Result.success(cached)

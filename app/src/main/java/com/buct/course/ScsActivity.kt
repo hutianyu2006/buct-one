@@ -624,7 +624,7 @@ private fun ScsFiveDimensionsCard(
                 color = MaterialTheme.colorScheme.onSurface
             )
             Text(
-                text = if (term.totalScore != null) "总分 ${formatScore(term.totalScore)}" else "待评定",
+                text = term.totalScore?.let { "总分 ${formatScore(it)}" } ?: "待评定",
                 style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
                 color = MaterialTheme.colorScheme.primary
             )

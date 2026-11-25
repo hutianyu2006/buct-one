@@ -6,15 +6,15 @@ import com.buct.one.data.model.SjcxExperimentScheduleItem
 import com.buct.one.data.model.SjcxExperimentScoreItem
 import com.buct.one.data.model.SjcxLectureBatchItem
 import com.buct.one.data.model.SjcxMyLectureItem
-import org.json.JSONArray
-import org.json.JSONObject
+import com.buct.one.data.json.JSONArray
+import com.buct.one.data.json.JSONObject
 
 /**
  * 实践教学综合服务平台（sjcx.buct.edu.cn）响应解析器。
  * 遵循数据层铁律 3：改动解析逻辑必须递增 PARSER_VERSION。
  */
 object SjcxParser {
-    const val PARSER_VERSION: Int = 2
+    const val PARSER_VERSION: Int = 3
 
     data class CasLoginInfo(
         val rsaPublicKeyBase64: String,

@@ -10,16 +10,16 @@ import com.buct.one.data.model.TyglPeCourseScore
 import com.buct.one.data.model.TyglPrescription
 import com.buct.one.data.model.TyglProfile
 import com.buct.one.data.model.TyglRunPlan
-import org.jsoup.Jsoup
-import org.jsoup.nodes.Element
-import java.net.URLDecoder
+import com.fleeksoft.ksoup.Ksoup
+import com.fleeksoft.ksoup.nodes.Element
+import com.buct.one.data.text.urlDecode
 
 /**
  * 体质测试与体育管理平台（tygl.buct.edu.cn）纯函数 HTML 解析器。
  * 改动解析逻辑时必须将 PARSER_VERSION + 1。
  */
 object TyglParser {
-    const val PARSER_VERSION = 1
+    const val PARSER_VERSION = 2
 
     private val YEAR_QUERY_REGEX = Regex("[?&]year=([^&]+)")
     private val CODE_IN_PARENS_REGEX = Regex("\\((\\d+)\\)")
@@ -34,7 +34,7 @@ object TyglParser {
     )
 
     fun parseSidPortalPage(html: String): SidPortalFormParams {
-        val doc = Jsoup.parse(html)
+        val doc = Ksoup.parse(html)
         fun text(id: String) = doc.selectFirst("#$id")?.text()?.trim().orEmpty()
         return SidPortalFormParams(
             execution = text("login-page-flowkey"),
@@ -63,14 +63,14 @@ object TyglParser {
     }
 
     fun parseFitnessYearTabs(html: String): List<Pair<String, String>> {
-        val doc = Jsoup.parse(html)
+        val doc = Ksoup.parse(html)
         val result = ArrayList<Pair<String, String>>()
         val seen = HashSet<String>()
         for (a in doc.select("table.table_t a[href*=stu_ht_score]")) {
             val href = a.attr("href")
             val match = YEAR_QUERY_REGEX.find(href) ?: continue
             val encoded = match.groupValues[1]
-            val key = runCatching { URLDecoder.decode(encoded, "UTF-8") }.getOrDefault(encoded).trim()
+            val key = runCatching { urlDecode(encoded) }.getOrDefault(encoded).trim()
             if (key.isEmpty() || !seen.add(key)) continue
             val label = cleanText(a.text()).ifBlank { key }
             result.add(key to label)
@@ -83,7 +83,7 @@ object TyglParser {
         fallbackYearKey: String = "",
         fallbackYearLabel: String = ""
     ): Pair<TyglProfile, TyglFitnessRecord?> {
-        val doc = Jsoup.parse(html)
+        val doc = Ksoup.parse(html)
 
         var activeKey = fallbackYearKey
         var activeLabel = fallbackYearLabel
@@ -93,7 +93,7 @@ object TyglParser {
             val match = YEAR_QUERY_REGEX.find(activeLink.attr("href"))
             if (match != null) {
                 val enc = match.groupValues[1]
-                activeKey = runCatching { URLDecoder.decode(enc, "UTF-8") }.getOrDefault(enc).trim()
+                activeKey = runCatching { urlDecode(enc) }.getOrDefault(enc).trim()
             }
             activeLabel = cleanText(activeLink.text())
         }
@@ -249,7 +249,7 @@ object TyglParser {
     }
 
     fun parseSunScorePage(html: String): Triple<TyglRunPlan?, List<TyglExerciseColumn>, List<TyglExerciseTerm>> {
-        val doc = Jsoup.parse(html)
+        val doc = Ksoup.parse(html)
 
         val runPlanTable = doc.selectFirst("#runPlanContent table")
         val runPlan = runPlanTable?.let { tbl ->
@@ -309,7 +309,7 @@ object TyglParser {
     }
 
     fun parsePeScorePage(html: String): List<TyglPeCourseScore> {
-        val doc = Jsoup.parse(html)
+        val doc = Ksoup.parse(html)
         val table = doc.selectFirst("table#searchtermresults") ?: return emptyList()
         val rows = table.select("tr")
         val list = ArrayList<TyglPeCourseScore>()
@@ -355,7 +355,7 @@ object TyglParser {
     }
 
     fun parseExamPage(html: String): TyglExamInfo? {
-        val doc = Jsoup.parse(html)
+        val doc = Ksoup.parse(html)
         var currentTerm = ""
         var peClass = ""
         var remainingAttempts: Int? = null

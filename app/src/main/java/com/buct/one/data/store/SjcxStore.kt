@@ -134,9 +134,7 @@ class SjcxStore(context: Context) {
                 }
             )
             put("lastError", slice.lastError ?: "")
-            if (slice.data != null) {
-                put("data", serializeSnapshot(slice.data))
-            }
+            slice.data?.let { put("data", serializeSnapshot(it)) }
         }
         atomicWrite(snapshotFile, root.toString())
     }

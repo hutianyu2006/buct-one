@@ -7,10 +7,11 @@ import com.buct.one.data.model.ElectricityCatalogRoom
 import com.buct.one.data.model.ElectricityReading
 import com.buct.one.data.model.ElectricityRoomCatalog
 import com.buct.one.data.model.ElectricityRoomTarget
-import org.json.JSONArray
-import org.json.JSONObject
+import com.buct.one.data.json.JSONArray
+import com.buct.one.shared.nowMillis
+import com.buct.one.data.json.JSONObject
 
-internal data class ParsedGatewayError(
+data class ParsedGatewayError(
     val message: String,
     val retryAfterSeconds: Int?,
     val isBanned: Boolean
@@ -19,9 +20,9 @@ internal data class ParsedGatewayError(
 /**
  * 宿舍电费查询网关（ele.buct.one）纯函数解析器。
  */
-internal object ElectricityParser {
+object ElectricityParser {
 
-    const val PARSER_VERSION = 1
+    const val PARSER_VERSION = 2
 
     fun parseRoomCatalog(jsonText: String): ElectricityRoomCatalog {
         val root = JSONObject(jsonText)
@@ -126,7 +127,7 @@ internal object ElectricityParser {
             balanceValue = balanceValue,
             unit = unit,
             accountStatus = obj.optString("accountStatus", "").trim(),
-            queriedAtEpochSec = obj.optLong("queriedAt", System.currentTimeMillis() / 1000L),
+            queriedAtEpochSec = obj.optLong("queriedAt", nowMillis() / 1000L),
             fromCache = obj.optBoolean("fromCache", false)
         )
     }

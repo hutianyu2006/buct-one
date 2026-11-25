@@ -6,16 +6,16 @@ import com.buct.one.data.model.ScsCurrentEvalWindow
 import com.buct.one.data.model.ScsEvalDimension
 import com.buct.one.data.model.ScsEvalItem
 import com.buct.one.data.model.ScsTermScore
-import org.json.JSONArray
-import org.json.JSONObject
-import org.jsoup.Jsoup
+import com.buct.one.data.json.JSONArray
+import com.buct.one.data.json.JSONObject
+import com.fleeksoft.ksoup.Ksoup
 
 /**
  * 第二课堂（scs.buct.edu.cn / eapi.buct.edu.cn）纯函数 JSON/HTML 解析器。
  * 改动解析逻辑时必须将 PARSER_VERSION + 1。
  */
 object ScsParser {
-    const val PARSER_VERSION = 1
+    const val PARSER_VERSION = 2
 
     data class SidPortalFormParams(
         val execution: String,
@@ -37,7 +37,7 @@ object ScsParser {
     )
 
     fun parseSidPortalPage(html: String): SidPortalFormParams {
-        val doc = Jsoup.parse(html)
+        val doc = Ksoup.parse(html)
         fun text(id: String) = doc.selectFirst("#$id")?.text()?.trim().orEmpty()
         return SidPortalFormParams(
             execution = text("login-page-flowkey"),

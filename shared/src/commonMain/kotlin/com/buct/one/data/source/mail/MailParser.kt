@@ -5,17 +5,16 @@ import com.buct.one.data.model.MailAttachment
 import com.buct.one.data.model.MailFolder
 import com.buct.one.data.model.MailMessageDetail
 import com.buct.one.data.model.MailMessageSummary
-import org.json.JSONArray
-import org.json.JSONObject
-import org.jsoup.Jsoup
-import java.io.IOException
+import com.buct.one.data.json.JSONArray
+import com.buct.one.data.json.JSONObject
+import com.fleeksoft.ksoup.Ksoup
 
 /**
  * 校园邮箱（网易企业邮箱 `/js6/s` JSON RPC 与 sidportal 登录页）纯函数解析器。
  * 改动解析逻辑时必须将 PARSER_VERSION + 1。
  */
 object MailParser {
-    const val PARSER_VERSION = 2
+    const val PARSER_VERSION = 3
 
     data class SidLoginPage(
         val execution: String,
@@ -29,7 +28,7 @@ object MailParser {
     )
 
     fun parseSidPortalPage(html: String): SidLoginPage {
-        val doc = Jsoup.parse(html)
+        val doc = Ksoup.parse(html)
         fun text(id: String) = doc.selectFirst("#$id")?.text()?.trim().orEmpty()
         val execution = text("login-page-flowkey").ifBlank {
             doc.selectFirst("input[name=execution]")?.attr("value")?.trim().orEmpty()
@@ -84,7 +83,7 @@ object MailParser {
         val root = JSONObject(json)
         val code = root.optString("code", "")
         if (code != "S_OK") {
-            throw IOException("获取邮箱文件夹失败（$code）")
+            throw IllegalArgumentException("获取邮箱文件夹失败（$code）")
         }
         val arr = root.optJSONArray("var") ?: return emptyList()
         val result = ArrayList<MailFolder>(arr.length())
@@ -113,7 +112,7 @@ object MailParser {
         val root = JSONObject(json)
         val code = root.optString("code", "")
         if (code != "S_OK") {
-            throw IOException("获取邮件列表失败（$code）")
+            throw IllegalArgumentException("获取邮件列表失败（$code）")
         }
         val arr = root.optJSONArray("var") ?: JSONArray()
         val total = root.optInt("total", arr.length())
@@ -159,10 +158,10 @@ object MailParser {
         val root = JSONObject(json)
         val code = root.optString("code", "")
         if (code != "S_OK") {
-            throw IOException("读取邮件详情失败（$code）")
+            throw IllegalArgumentException("读取邮件详情失败（$code）")
         }
         val body = root.optJSONObject("var")
-            ?: throw IOException("邮件正文响应缺少 var 字段")
+            ?: throw IllegalArgumentException("邮件正文响应缺少 var 字段")
         val htmlObj = body.optJSONObject("html")
         val textObj = body.optJSONObject("text")
         val htmlContent = htmlObj?.optString("content", "").orEmpty()
@@ -182,7 +181,7 @@ object MailParser {
         )
     }
 
-    internal fun splitSender(raw: String): Pair<String, String> {
+    fun splitSender(raw: String): Pair<String, String> {
         val trimmed = raw.trim()
         if (trimmed.isEmpty()) return "" to ""
         val lt = trimmed.lastIndexOf('<')

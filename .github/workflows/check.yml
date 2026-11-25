@@ -8,6 +8,7 @@ on:
     # .gitignore 及所有 **/*.md 等不影响检查与编译的文件均不触发。
     paths:
       - 'app/**'
+      - 'shared/**'
       - 'gradle/**'
       - 'build.gradle'
       - 'settings.gradle'
@@ -26,6 +27,7 @@ on:
     branches: [main]
     paths:
       - 'app/**'
+      - 'shared/**'
       - 'gradle/**'
       - 'build.gradle'
       - 'settings.gradle'
@@ -74,6 +76,7 @@ jobs:
           }
 
           check "$SRC/model" "^import " "model/ 必须零依赖"
+          check "shared/src/commonMain/kotlin/com/buct/one/data/model" "^import " "共享 model/ 必须零依赖"
           check "$SRC/store" "import com\.buct\.(one\.data\.(source|sync)|course\.ui)" "store/ 越层依赖"
           check "$SRC/source" "import com\.buct\.(one\.data\.(store|sync)|course\.ui)" "source/ 越层依赖"
           check "$SRC/sync" "import com\.buct\.(one|course)\.ui" "sync/ 禁止依赖 ui"
@@ -137,3 +140,8 @@ jobs:
         run: |
           chmod +x ./gradlew
           ./gradlew :app:compileDebugSources --no-daemon --stacktrace --build-cache
+
+      - name: Shared module JVM tests
+        run: |
+          chmod +x ./gradlew
+          ./gradlew :shared:jvmTest --no-daemon --stacktrace --build-cache

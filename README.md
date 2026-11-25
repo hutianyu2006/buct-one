@@ -137,7 +137,7 @@ model/    → 零任何外部 import
 | 网络与安全 | OkHttp + BouncyCastle（SM2）+ `BuctTlsTrustManager` + `Android Keystore` |
 | 持久化 | 分域 JSON 原子落盘 + 加密会话 Vault + `SharedPreferences` |
 | 构建与交付 | Android 单 module，全云端 GitHub Actions CI（JDK 21，100MB APK 体积硬门禁，R2 + Release 双源发布） |
-| 跨端（iOS 预览版） | Kotlin Multiplatform + Compose Multiplatform：`shared/` 共享公告通道与 Compose UI，`iosApp/` SwiftUI 壳，`ios-build` 在 macOS runner 构建 |
+| 跨端（iOS + 双端共享逻辑） | Kotlin Multiplatform：`:shared` 的 `commonMain` 承载数据模型、9 个数据域解析器与公告通道（Android 以 JVM 变体消费、iOS 以 `Shared.framework` 消费，同一份源码）；iOS UI 用 Compose Multiplatform（`shared/src/iosMain`），`iosApp/` 仅 SwiftUI 壳 |
 
 ---
 
@@ -152,9 +152,12 @@ model/    → 零任何外部 import
 iOS 预览版（`shared/` + `iosApp/`）需要 macOS + Xcode 与 JDK 21，模拟器构建由 `ios-build` 工作流自动完成；本机可这样验证：
 
 ```bash
+./gradlew :shared:jvmTest                               # 共享逻辑单测（解析器 / 模型，Ubuntu CI 亦执行）
 ./gradlew :shared:linkDebugFrameworkIosSimulatorArm64   # 仅验证 Kotlin 共享层
 open iosApp/iosApp.xcodeproj                            # 用 Xcode 运行 iOS App
 ```
+
+> 双端复用约定：**新的数据模型与解析器一律写在 `shared/src/commonMain`**，Android 与 iOS 会自动编译同一份代码；改解析逻辑时只需在 `shared/src/commonTest` 补样本单测（`parserVersion` 递增规则不变）。
 
 正式发布签名配置与 Keystore 规范请参阅 [签名接入指南](docs/签名接入.md)。
 
@@ -180,7 +183,7 @@ open iosApp/iosApp.xcodeproj                            # 用 Xcode 运行 iOS A
 - [x] **作业与考试 Excel/CSV 表格批量导入**：支持标准模板分享、表格解析审核导入与校园邮箱附件一键导入
 - [x] **本地轻量智能提醒与桌面小组件扩展**：作业 DDL / 考试倒计时 / 图书到期 / 电费与校园卡低余额提醒，以及 DDL 倒计时、余额信息卡小组件
 - [x] **成绩 GPA 试算、多级树状培养方案与校园卡消费洞察**：官方累计 GPA 折线图、目标 GPA 试算、培养方案树状结构展开交互与消费分类占比统计
-- [x] **iOS 预览版起步**：Kotlin Multiplatform 共享模块 + Compose Multiplatform UI，先接通公告通道（`notice.buct.one`），教务 / 校园卡等模块按域逐步迁移
+- [x] **iOS 预览版起步 + 双端共享解析层**：`:shared` 支持 Android（JVM 变体）与 iOS 双目标；数据模型与 8 个数据域解析器迁入 `commonMain`（Android 直接消费、iOS 同一份源码），公告通道双端复用，`:shared:jvmTest` 进 CI
 - [ ] 东区 ↔ 昌平通勤班车时刻表 & 实用校内入口轻导航
 - [ ] 全数据域 Parser 离线单测回归（已覆盖正方教务、北化在线资源、电费与校园网，其余域持续补齐）
 
@@ -194,8 +197,9 @@ open iosApp/iosApp.xcodeproj                            # 用 Xcode 运行 iOS A
 app/src/main/java/
   com/buct/course/    主应用 UI、独立页（一卡通/实践教学/第二课堂/体测/校园邮箱/i北化/教务消息/宿舍电费/校园网网费）、教务适配、自动更新、匿名统计、桌面小组件
   com/buct/one/data/  纯分层数据内核（model / session / source / store / sync）
-shared/src/           Kotlin Multiplatform 共享模块（commonMain 公告通道 + Compose Multiplatform UI，iosMain 平台实现）
-iosApp/               iOS 宿主工程（SwiftUI 壳 + Xcode 工程，加载 :shared 的 Shared.framework）
+shared/src/commonMain/  双端共享逻辑：数据模型（data/model）、响应解析器（data/source/<域>）、JSON 外观（data/json）、公告通道
+shared/src/iosMain/     iOS 专属：Compose Multiplatform UI、Darwin 网络、平台入口（MainViewController）
+iosApp/                 iOS 宿主工程（SwiftUI 壳 + Xcode 工程，加载 :shared 的 Shared.framework）
 docs/                 路线规划（规划.md）与正式发布签名配置（签名接入.md）
 .github/workflows/    GitHub Actions 静态门禁（check.yml）、APK 构建（build-apk.yml）、iOS 构建（ios.yml）与标签发版（release-apk.yml）
 NOTICE                上游开源工程溯源与许可声明

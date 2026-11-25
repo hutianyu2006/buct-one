@@ -34,6 +34,13 @@ CI 里 `Package dependency rules` 这一步会 grep 检查，违反即失败。
 3. `parserVersion` 只增不减；改解析逻辑必须 +1
 4. `capturedAt` 单调不减（时钟回拨保护）
 
+## 跨端（Android / iOS）
+
+- 双端复用的逻辑一律写在 `shared/src/commonMain`：数据模型（`com.buct.one.data.model`，零 import 约束不变）、响应解析器（`com.buct.one.data.source.<域>`）、公告通道。
+- 解析层只允许使用 `com.buct.one.data.json`（kotlinx.serialization 的 org.json 只读外观）、`com.buct.one.data.text` 与 Ksoup；**禁止** `org.json`、`org.jsoup`、`java.*`、`android.*`。
+- Android 通过 `:shared` 的 JVM 变体消费，iOS 通过 `Shared.framework`；新增解析器必须在 `shared/src/commonTest` 补样本单测，CI 的 `:shared:jvmTest` 会执行。
+- iOS 专属实现（Compose Multiplatform UI、Darwin 网络）放 `shared/src/iosMain`；`iosApp/` 只保留 SwiftUI 壳与 Xcode 工程。
+
 ## 界面与预测性返回手势
 
 - 全局启用 Android 14+ 预测性返回手势（`android:enableOnBackInvokedCallback="true"`），并受「我的 → 外观 → 预测性返回手势」（`AppearanceSettingsManager.predictiveBackEnabled`）控制。

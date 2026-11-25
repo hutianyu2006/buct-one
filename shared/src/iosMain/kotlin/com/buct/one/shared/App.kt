@@ -30,7 +30,7 @@ internal sealed interface NoticeUiState {
 @Composable
 fun App() {
     BuctOneTheme {
-        val repository = remember { NoticeRepository() }
+        val repository = remember { NoticeRepository(createDarwinHttpClient()) }
         DisposableEffect(repository) {
             onDispose { repository.close() }
         }

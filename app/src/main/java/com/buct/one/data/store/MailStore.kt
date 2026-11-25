@@ -161,9 +161,7 @@ class MailStore(context: Context) {
                     put("refreshState", slice.provenance.refreshState.name)
                 }
             )
-            if (slice.data != null) {
-                put("data", serializeSnapshot(slice.data))
-            }
+            slice.data?.let { put("data", serializeSnapshot(it)) }
             if (slice.lastError != null) {
                 put("lastError", slice.lastError)
             }

@@ -4,11 +4,11 @@ import com.buct.one.data.model.CampusNetCheckoutRecord
 import com.buct.one.data.model.CampusNetOnlineDevice
 import com.buct.one.data.model.CampusNetPayRecord
 import com.buct.one.data.model.CampusNetSnapshot
-import org.json.JSONObject
-import org.jsoup.Jsoup
-import org.jsoup.nodes.Element
+import com.buct.one.data.json.JSONObject
+import com.fleeksoft.ksoup.Ksoup
+import com.fleeksoft.ksoup.nodes.Element
 
-internal data class SelfServiceHomeData(
+data class SelfServiceHomeData(
     val accountStatus: String = "",
     val walletBalance: Double? = null,
     val productsName: String = "",
@@ -23,13 +23,13 @@ internal data class SelfServiceHomeData(
 /**
  * 北化校园网（tree.buct.edu.cn & :8800 自服务平台）纯函数解析器。
  */
-internal object CampusNetParser {
+object CampusNetParser {
 
-    const val PARSER_VERSION = 2
+    const val PARSER_VERSION = 3
 
     private val NUMBER_RE = Regex("""[-+]?\d+(?:,\d{3})*(?:\.\d+)?""")
 
-    internal fun stripJsonp(raw: String): JSONObject {
+    fun stripJsonp(raw: String): JSONObject {
         val trimmed = raw.trim()
         if (trimmed.startsWith("{")) {
             return JSONObject(trimmed)
@@ -43,7 +43,7 @@ internal object CampusNetParser {
         throw IllegalArgumentException("无法解析深澜响应：$trimmed")
     }
 
-    internal fun parseUserInfo(raw: String): CampusNetSnapshot {
+    fun parseUserInfo(raw: String): CampusNetSnapshot {
         val obj = stripJsonp(raw)
         val error = obj.optString("error", "").trim()
         val isOnline = error.equals("ok", ignoreCase = true)
@@ -75,11 +75,11 @@ internal object CampusNetParser {
         )
     }
 
-    internal fun parseSelfServiceHome(html: String): SelfServiceHomeData? {
+    fun parseSelfServiceHome(html: String): SelfServiceHomeData? {
         if (!html.contains("电子钱包") && !html.contains("产品信息") && !html.contains("w3-container")) {
             return null
         }
-        val doc = Jsoup.parse(html)
+        val doc = Ksoup.parse(html)
         if (doc.selectFirst("#w3-container") == null && doc.select("li.list-group-item").isEmpty()) {
             return null
         }
@@ -148,8 +148,8 @@ internal object CampusNetParser {
         )
     }
 
-    internal fun parsePayRecords(html: String): List<CampusNetPayRecord> {
-        val doc = Jsoup.parse(html)
+    fun parsePayRecords(html: String): List<CampusNetPayRecord> {
+        val doc = Ksoup.parse(html)
         val out = ArrayList<CampusNetPayRecord>()
         for (tr in doc.select("table.kv-grid-table tbody tr")) {
             if (isEmptyRow(tr)) continue
@@ -170,8 +170,8 @@ internal object CampusNetParser {
         return out
     }
 
-    internal fun parseCheckoutRecords(html: String): List<CampusNetCheckoutRecord> {
-        val doc = Jsoup.parse(html)
+    fun parseCheckoutRecords(html: String): List<CampusNetCheckoutRecord> {
+        val doc = Ksoup.parse(html)
         val out = ArrayList<CampusNetCheckoutRecord>()
         for (tr in doc.select("table.kv-grid-table tbody tr")) {
             if (isEmptyRow(tr)) continue
@@ -197,7 +197,7 @@ internal object CampusNetParser {
         return out
     }
 
-    internal fun mergeSnapshot(
+    fun mergeSnapshot(
         rad: CampusNetSnapshot?,
         home: SelfServiceHomeData?,
         payRecords: List<CampusNetPayRecord>,

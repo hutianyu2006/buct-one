@@ -8,7 +8,10 @@ import platform.Foundation.NSURL
 import platform.Foundation.timeIntervalSince1970
 import platform.UIKit.UIApplication
 
-internal actual fun createHttpClient(): HttpClient = HttpClient(Darwin) {
+internal actual fun nowMillis(): Long = (NSDate().timeIntervalSince1970 * 1000.0).toLong()
+
+/** iOS 网络客户端：Darwin（NSURLSession）+ 统一超时。 */
+internal fun createDarwinHttpClient(): HttpClient = HttpClient(Darwin) {
     install(HttpTimeout) {
         requestTimeoutMillis = 15_000
         connectTimeoutMillis = 10_000
@@ -16,11 +19,11 @@ internal actual fun createHttpClient(): HttpClient = HttpClient(Darwin) {
     }
 }
 
-internal actual fun nowMillis(): Long = (NSDate().timeIntervalSince1970 * 1000.0).toLong()
+/** 平台名称，仅用于「关于」页展示。 */
+internal fun platformLabel(): String = "iOS"
 
-internal actual fun platformLabel(): String = "iOS"
-
-internal actual fun openUrl(url: String) {
+/** 打开外部链接（GitHub 仓库等）。 */
+internal fun openUrl(url: String) {
     val target = NSURL.URLWithString(url) ?: return
     UIApplication.sharedApplication.openURL(target, emptyMap<Any?, Any?>(), null)
 }

@@ -1990,13 +1990,17 @@ private fun buildCompactSummary(
             firstReading != null -> formatElectricityPrimaryValue(firstReading)
             else -> "待查询"
         }
+        val firstBalance = firstReading?.balanceValue
         val miniText = when {
             !electricityConsentAccepted -> "需授权"
             targets.isEmpty() -> "未绑定"
-            firstReading?.balanceValue != null -> {
-                val v = firstReading.balanceValue
-                val num = if (v % 1.0 == 0.0) v.toInt().toString() else String.format(Locale.US, "%.1f", v)
-                "$num${firstReading.unit}"
+            firstBalance != null -> {
+                val num = if (firstBalance % 1.0 == 0.0) {
+                    firstBalance.toInt().toString()
+                } else {
+                    String.format(Locale.US, "%.1f", firstBalance)
+                }
+                "$num${firstReading?.unit.orEmpty()}"
             }
             firstReading != null -> firstReading.balanceText
             else -> "电费"
@@ -2478,8 +2482,7 @@ private fun RenderMediumModuleCard(
                     Text(
                         text = when {
                             latestFitness != null -> "${latestFitness.testYear.ifBlank { latestFitness.yearLabel }} · ${latestFitness.level.ifBlank { "已测" }}"
-                            tyglData?.runPlan != null -> "${tyglData.runPlan.projectName} · 点击查看"
-                            else -> "历年体测 · 阳光跑"
+                            else -> tyglData?.runPlan?.let { "${it.projectName} · 点击查看" } ?: "历年体测 · 阳光跑"
                         },
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,

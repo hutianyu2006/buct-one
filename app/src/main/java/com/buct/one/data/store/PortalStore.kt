@@ -245,9 +245,7 @@ class PortalStore(context: Context) {
                     put("refreshState", slice.provenance.refreshState.name)
                 }
             )
-            if (slice.data != null) {
-                put("data", serialize(slice.data))
-            }
+            slice.data?.let { put("data", serialize(it)) }
             if (slice.lastError != null) {
                 put("lastError", slice.lastError)
             }

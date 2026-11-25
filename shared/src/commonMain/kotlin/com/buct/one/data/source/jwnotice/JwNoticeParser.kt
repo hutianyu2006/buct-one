@@ -5,17 +5,17 @@ import com.buct.one.data.model.JwAnnouncementItem
 import com.buct.one.data.model.JwNoticeSnapshot
 import com.buct.one.data.model.JwReminderItem
 import com.buct.one.data.model.classifyJwReminder
-import org.json.JSONArray
-import org.json.JSONObject
-import org.jsoup.Jsoup
-import org.jsoup.nodes.Document
+import com.buct.one.data.json.JSONArray
+import com.buct.one.data.json.JSONObject
+import com.fleeksoft.ksoup.Ksoup
+import com.fleeksoft.ksoup.nodes.Document
 
 /**
  * 教务系统（jwglxt.buct.edu.cn）消息与通知公告纯函数解析器。
  * 遵循数据层铁律 3：改动解析逻辑必须递增 PARSER_VERSION。
  */
 object JwNoticeParser {
-    const val PARSER_VERSION: Int = 1
+    const val PARSER_VERSION: Int = 2
 
     const val DETAIL_BASE_URL: String = "https://jwglxt.buct.edu.cn/jwglxt/xtgl/"
 
@@ -32,7 +32,7 @@ object JwNoticeParser {
     }
 
     fun parseSidPortalPage(html: String): SidPortalPageInfo {
-        val doc = Jsoup.parse(html)
+        val doc = Ksoup.parse(html)
         fun text(id: String): String = doc.selectFirst("#$id")?.text()?.trim().orEmpty()
         return SidPortalPageInfo(
             execution = text("login-page-flowkey"),
@@ -131,7 +131,7 @@ object JwNoticeParser {
         fallbackTime: String = "",
         fallbackInlineHtml: String = ""
     ): JwAnnouncementDetail {
-        val doc: Document = Jsoup.parse(html, DETAIL_BASE_URL)
+        val doc: Document = Ksoup.parse(html, DETAIL_BASE_URL)
         val container = doc.selectFirst("div.newsdisp") ?: doc.body()
 
         val title = container.selectFirst("h3.text-center")?.text()?.trim().orEmpty()
@@ -174,9 +174,9 @@ object JwNoticeParser {
 
     fun sanitizeBodyHtml(rawHtml: String): Pair<String, String> {
         if (rawHtml.isBlank()) return "" to ""
-        val frag = Jsoup.parseBodyFragment(rawHtml, DETAIL_BASE_URL)
+        val frag = Ksoup.parseBodyFragment(rawHtml, DETAIL_BASE_URL)
         frag.select("script, iframe, object, embed, form, style").remove()
-        for (el in frag.allElements) {
+        for (el in frag.getAllElements()) {
             val attrsToRemove = el.attributes().asList()
                 .map { it.key }
                 .filter { key ->

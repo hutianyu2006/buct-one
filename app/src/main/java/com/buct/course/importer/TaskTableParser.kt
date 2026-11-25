@@ -170,13 +170,15 @@ object TaskTableParser {
                 val existingLocal = existingByImportKey[importKey]
                 val isTheolPlatform = submitWay.contains("北化在线") || sheet.name.contains("北化在线")
                 val matchesTheol = existingTheolHomeworks.any {
+                    val theolDeadline = it.deadlineMillis
                     isCourseMatched(cleanCourse, it.courseName) &&
-                        (it.deadlineMillis == null || deadlineMillis == null ||
-                            abs(it.deadlineMillis - deadlineMillis) <= 48 * 3600_000L)
+                        (theolDeadline == null || deadlineMillis == null ||
+                            abs(theolDeadline - deadlineMillis) <= 48 * 3600_000L)
                 } || existingTheolTests.any {
+                    val theolEndTime = it.endTimeMillis
                     isCourseMatched(cleanCourse, it.courseName) &&
-                        (it.endTimeMillis == null || deadlineMillis == null ||
-                            abs(it.endTimeMillis - deadlineMillis) <= 48 * 3600_000L)
+                        (theolEndTime == null || deadlineMillis == null ||
+                            abs(theolEndTime - deadlineMillis) <= 48 * 3600_000L)
                 }
 
                 val expired = deadlineMillis != null && deadlineMillis < nowMillis
