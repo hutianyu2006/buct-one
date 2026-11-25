@@ -806,3 +806,39 @@ jobs:
             -derivedDataPath "$RUNNER_TEMP/DerivedData" \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
             build
+
+      # 真机（arm64）未签名 .app → 打包成 Payload/*.ipa 产物，签名后再分发
+      - name: Build unsigned device app
+        run: |
+          xcodebuild -project iosApp/iosApp.xcodeproj -scheme iosApp \
+            -configuration Debug \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/DerivedDataDevice" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Package IPA and simulator app
+        run: |
+          set -euo pipefail
+          rm -rf dist
+          mkdir -p dist/Payload
+
+          SIM_APP=$(find "$RUNNER_TEMP/DerivedData/Build/Products/Debug-iphonesimulator" -maxdepth 1 -name "*.app" | head -1)
+          if [ -z "$SIM_APP" ]; then echo "::error::找不到模拟器 .app"; exit 1; fi
+          ditto -c -k --sequesterRsrc --keepParent "$SIM_APP" "dist/iosApp-simulator.zip"
+
+          DEV_APP=$(find "$RUNNER_TEMP/DerivedDataDevice/Build/Products/Debug-iphoneos" -maxdepth 1 -name "*.app" | head -1)
+          if [ -z "$DEV_APP" ]; then echo "::error::找不到真机 .app"; exit 1; fi
+          cp -R "$DEV_APP" dist/Payload/
+          ( cd dist && zip -qry "buct-one-unsigned.ipa" Payload )
+
+          ls -lh dist
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ipa
+          path: |
+            dist/buct-one-unsigned.ipa
+            dist/iosApp-simulator.zip
+          if-no-files-found: error
