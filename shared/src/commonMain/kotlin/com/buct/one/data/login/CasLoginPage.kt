@@ -13,7 +13,7 @@ data class CasLoginPage(
     val phoneMask: String,
 ) {
     companion object {
-        private val P_TAG_PATTERN = Regex("""<p[^>]*id="([^"]+)"[^>]*>(.*?)</p>""", RegexOption.DOTALL)
+        private val P_TAG_PATTERN = Regex("""<p[^>]*id="([^"]+)"[^>]*>(.*?)</p>""", RegexOption.DOT_MATCHES_ALL)
         private val INPUT_TAG_PATTERN = Regex("""<input[^>]*>""", RegexOption.IGNORE_CASE)
 
         /** 解析登录页；缺失字段返回 null 值，由调用方决定报错文案。 */
@@ -59,11 +59,12 @@ data class CasLoginPage(
     }
 }
 
+/** 登录页缺少必要字段（execution / croypto）或加密失败。 */
+class CasLoginFormMissingFieldException(message: String) : Exception(message)
+
 /** CAS 密码登录表单（顺序与校方前端一致，勿随意调整）。 */
 data class CasLoginForm(val fields: Map<String, String>) {
     companion object {
-        class MissingFieldException(message: String) : Exception(message)
-
         fun build(
             page: CasLoginPage,
             username: String,
@@ -71,17 +72,17 @@ data class CasLoginForm(val fields: Map<String, String>) {
             captchaCode: String = "",
             eventId: String = "submit",
         ): CasLoginForm {
-            val aesKey = page.aesKey ?: throw MissingFieldException("统一认证密钥缺失，请重新登录")
-            val execution = page.execution ?: throw MissingFieldException("统一认证会话失效，请重新登录")
+            val aesKey = page.aesKey ?: throw CasLoginFormMissingFieldException("统一认证密钥缺失，请重新登录")
+            val execution = page.execution ?: throw CasLoginFormMissingFieldException("统一认证会话失效，请重新登录")
             val encryptedPassword = try {
                 AesLoginCrypto.encrypt(aesKey, password)
             } catch (error: AesLoginCrypto.CryptoException) {
-                throw MissingFieldException(error.message ?: "统一认证密码加密失败")
+                throw CasLoginFormMissingFieldException(error.message ?: "统一认证密码加密失败")
             }
             val captchaPayload = try {
                 AesLoginCrypto.encrypt(aesKey, "{}")
             } catch (error: AesLoginCrypto.CryptoException) {
-                throw MissingFieldException(error.message ?: "统一认证参数加密失败")
+                throw CasLoginFormMissingFieldException(error.message ?: "统一认证参数加密失败")
             }
             return CasLoginForm(
                 linkedMapOf(

@@ -51,7 +51,7 @@ class CasPasswordLoginClient(
         val page = CasLoginPage.parse(pageHtml)
         val form = try {
             CasLoginForm.build(page, username, password, captchaCode)
-        } catch (error: CasLoginForm.MissingFieldException) {
+        } catch (error: CasLoginFormMissingFieldException) {
             return CasLoginOutcome.Failed(error.message ?: "统一认证登录页解析失败")
         }
 
