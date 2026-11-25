@@ -38,6 +38,21 @@ fun parseDateTime(text: String, offsetSeconds: Int = BEIJING_OFFSET_SECONDS): Lo
 
 internal fun twoDigits(value: Int): String = if (value < 10) "0$value" else value.toString()
 
+/** Howard Hinnant 的 civil_from_days 算法（与 daysFromCivil 互逆）。 */
+internal fun civilFromEpochDay(epochDay: Long): Triple<Int, Int, Int> {
+    val z = epochDay + 719468L
+    val era = (if (z >= 0) z else z - 146096L) / 146097L
+    val dayOfEra = z - era * 146097L
+    val yearOfEra = (dayOfEra - dayOfEra / 1460L + dayOfEra / 36524L - dayOfEra / 146096L) / 365L
+    val year = yearOfEra + era * 400L
+    val dayOfYear = dayOfEra - (365L * yearOfEra + yearOfEra / 4L - yearOfEra / 100L)
+    val monthPrime = (5L * dayOfYear + 2L) / 153L
+    val day = dayOfYear - (153L * monthPrime + 2L) / 5L + 1L
+    val month = if (monthPrime < 10L) monthPrime + 3L else monthPrime - 9L
+    val civilYear = if (month <= 2L) year + 1L else year
+    return Triple(civilYear.toInt(), month.toInt(), day.toInt())
+}
+
 /** Howard Hinnant 的 days_from_civil 算法。 */
 internal fun daysFromCivil(year: Int, month: Int, day: Int): Long {
     val y = if (month <= 2) year - 1L else year.toLong()
