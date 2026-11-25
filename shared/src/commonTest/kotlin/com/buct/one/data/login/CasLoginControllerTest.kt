@@ -47,14 +47,17 @@ class CasLoginControllerTest {
 
     @Test
     fun invalidCredentials_movesToFailedState() = runTest {
-        val controller = controller(HttpStatusCode.OK, "<p id="login-error-code">1030027</p>")
+        val controller = controller(HttpStatusCode.OK, "<p id=\"login-error-code\">1030027</p>")
         controller.login("20230001", "wrong")
         assertEquals(LoginState.Failed("用户名或密码错误"), controller.state.value)
     }
 
     @Test
     fun captcha_movesToCaptchaState() = runTest {
-        val controller = controller(HttpStatusCode.OK, "<p id="login-croypto">x</p><p id="captcha-url">/captcha</p>")
+        val controller = controller(
+            HttpStatusCode.OK,
+            "<p id=\"login-croypto\">MDEyMzQ1Njc4OWFiY2RlZg==</p><p id=\"captcha-url\">/captcha</p>",
+        )
         controller.login("20230001", "p@ss")
         val state = controller.state.value
         assertTrue(state is LoginState.CaptchaRequired)
