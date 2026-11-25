@@ -15,9 +15,7 @@ import kotlin.test.assertTrue
 class CampusNetGatewayTest {
 
     private val radJsonp =
-        """jQuery123_45({"error":"ok","user_name":"20230001","online_ip":"10.20.30.40","products_name":"校园网",""""
-            + """"billing_name":"包月","sum_bytes":1073741824,"sum_seconds":7200,"user_balance":10.5,"""
-            + """"wallet_balance":12.5,"user_charge":1.0,"online_device_total":"2","keepalive_time":60})"""
+        """jQuery123_45({"error":"ok","user_name":"20230001","online_ip":"10.20.30.40","products_name":"校园网","billing_name":"包月","sum_bytes":1073741824,"sum_seconds":7200,"user_balance":10.5,"wallet_balance":12.5,"user_charge":1.0,"online_device_total":"2","keepalive_time":60})"""
 
     private val homeHtml = """
         <html><body>
