@@ -181,6 +181,8 @@ android {
 dependencies {
     // 双端复用的平台无关逻辑（数据模型、解析器、公告通道）：以 JVM 变体消费，无 AGP 依赖
     implementation project(':shared')
+    // 共享层 Ktor 客户端在 Android 侧使用的 OkHttp 引擎（TLS/DNS 由 BuctTlsTrustManager + BuctDns 接管）
+    implementation 'io.ktor:ktor-client-okhttp:3.6.1'
 
     // Core AndroidX
     implementation 'androidx.core:core-ktx:1.12.0'
