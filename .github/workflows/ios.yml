@@ -27,9 +27,6 @@ concurrency:
   group: ios-build-${{ github.ref }}
   cancel-in-progress: true
 
-permissions:
-  contents: write
-
 jobs:
   build-ios:
     runs-on: macos-15
@@ -55,34 +52,15 @@ jobs:
 
       - name: Compile shared framework (iOS Simulator)
         run: |
-          set -o pipefail
-          LOG_FILE="$RUNNER_TEMP/ios-build.log"
           chmod +x ./gradlew
           ./gradlew :shared:linkDebugFrameworkIosSimulatorArm64 \
-            --configure-on-demand --no-configuration-cache --build-cache --stacktrace 2>&1 | tee "$LOG_FILE"
+            --configure-on-demand --no-configuration-cache --build-cache --stacktrace
 
       - name: Build iOS app (Simulator)
         run: |
-          set -o pipefail
-          LOG_FILE="$RUNNER_TEMP/ios-build.log"
           xcodebuild -project iosApp/iosApp.xcodeproj -scheme iosApp \
             -configuration Debug \
             -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath "$RUNNER_TEMP/DerivedData" \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
-            build 2>&1 | tee -a "$LOG_FILE"
-
-      # 临时调试步骤：失败时把构建日志推送到 ci-ios-log 分支，便于定位问题。
-      - name: Publish build log on failure
-        if: failure()
-        run: |
-          set -x
-          LOG_FILE="$RUNNER_TEMP/ios-build.log"
-          [ -f "$LOG_FILE" ] || exit 0
-          tail -c 300000 "$LOG_FILE" > ci-ios-build.log || true
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout -B ci-ios-log
-          git add -f ci-ios-build.log
-          git commit -m "ci: iOS 构建失败日志（自动生成，可忽略）" || exit 0
-          git push --force origin ci-ios-log
+            build
