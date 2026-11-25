@@ -137,7 +137,7 @@ model/    → 零任何外部 import
 | 网络与安全 | OkHttp + BouncyCastle（SM2）+ `BuctTlsTrustManager` + `Android Keystore` |
 | 持久化 | 分域 JSON 原子落盘 + 加密会话 Vault + `SharedPreferences` |
 | 构建与交付 | Android 单 module，全云端 GitHub Actions CI（JDK 21，100MB APK 体积硬门禁，R2 + Release 双源发布） |
-| 跨端（iOS + 双端共享逻辑） | Kotlin Multiplatform：`:shared` 的 `commonMain` 承载数据模型、9 个数据域解析器与公告通道（Android 以 JVM 变体消费、iOS 以 `Shared.framework` 消费，同一份源码）；iOS UI 用 Compose Multiplatform（`shared/src/iosMain`），`iosApp/` 仅 SwiftUI 壳 |
+| 跨端（iOS + 双端共享逻辑） | Kotlin Multiplatform：`:shared` 的 `commonMain` 承载数据模型、**10 个数据域解析器**、公告通道与平台抽象层（存储 / 日志 / 调度 / HTTP / 加密）；Android 以 JVM 变体消费、iOS 以 `Shared.framework` 消费，同一份源码；iOS UI 用 Compose Multiplatform（`shared/src/iosMain`），`iosApp/` 仅 SwiftUI 壳 |
 
 ---
 
@@ -197,7 +197,7 @@ open iosApp/iosApp.xcodeproj                            # 用 Xcode 运行 iOS A
 app/src/main/java/
   com/buct/course/    主应用 UI、独立页（一卡通/实践教学/第二课堂/体测/校园邮箱/i北化/教务消息/宿舍电费/校园网网费）、教务适配、自动更新、匿名统计、桌面小组件
   com/buct/one/data/  纯分层数据内核（model / session / source / store / sync）
-shared/src/commonMain/  双端共享逻辑：数据模型（data/model）、响应解析器（data/source/<域>）、JSON 外观（data/json）、公告通道
+shared/src/commonMain/  双端共享逻辑：数据模型（data/model）、响应解析器（data/source/<域>）、JSON 外观（data/json）、文本/URL/日期工具（data/text）、平台抽象层（platform/：KeyValueStore / AppLogger / AppScheduler / HTTP / Crypto）、公告通道
 shared/src/iosMain/     iOS 专属：Compose Multiplatform UI、Darwin 网络、平台入口（MainViewController）
 iosApp/                 iOS 宿主工程（SwiftUI 壳 + Xcode 工程，加载 :shared 的 Shared.framework）
 docs/                 路线规划（规划.md）与正式发布签名配置（签名接入.md）

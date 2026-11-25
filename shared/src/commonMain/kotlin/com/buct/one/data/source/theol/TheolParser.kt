@@ -9,16 +9,18 @@ import com.buct.one.data.model.TheolResourceItem
 import com.buct.one.data.model.TheolResourcePage
 import com.buct.one.data.model.TheolTestDetail
 import com.buct.one.data.model.TheolTestItem
-import org.jsoup.Jsoup
-import org.jsoup.nodes.Document
-import org.jsoup.nodes.Element
-import org.jsoup.parser.Parser
-import java.net.URI
-import java.net.URL
-import java.net.URLEncoder
-import java.text.SimpleDateFormat
-import java.util.Locale
-import java.util.TimeZone
+import com.buct.one.data.text.htmlUnescape
+import com.buct.one.data.text.parseDateTimeLoose
+import com.buct.one.data.text.replaceUrlPath
+import com.buct.one.data.text.resolveUrl
+import com.buct.one.data.text.urlEncode
+import com.buct.one.data.text.urlHostOf
+import com.buct.one.data.text.urlPathOf
+import com.buct.one.data.text.urlQueryOf
+import com.buct.one.data.text.urlSchemeOf
+import com.fleeksoft.ksoup.Ksoup
+import com.fleeksoft.ksoup.nodes.Document
+import com.fleeksoft.ksoup.nodes.Element
 
 /**
  * 北化在线（THEOL / MEOL）HTML 纯函数解析器。
@@ -26,21 +28,12 @@ import java.util.TimeZone
  * 改动解析逻辑时必须将 PARSER_VERSION + 1。
  */
 object TheolParser {
-    const val PARSER_VERSION = 7
+    const val PARSER_VERSION = 8
     const val BASE_URL = "https://course.buct.edu.cn"
     private const val COURSE_HOME_PATH = "/meol/jpk/course/layout/newpage/index.jsp"
     private val COURSE_ONCLICK_ID_REGEX = Regex("""(?:courseId|lid)\s*=\s*(\d+)""")
 
     private val testStartRegex = Regex("""gotostart\('(\d+)'""")
-    private val deadlineFormats = listOf(
-        "yyyy年M月d日 HH:mm:ss",
-        "yyyy年M月d日 HH:mm",
-        "yyyy-MM-dd HH:mm:ss",
-        "yyyy-MM-dd HH:mm",
-        "yyyy-MM-dd'T'HH:mm:ss",
-        "yyyy-MM-dd'T'HH:mm"
-    )
-
     data class SidPortalPage(
         val execution: String,
         val croypto: String,
@@ -53,7 +46,7 @@ object TheolParser {
     )
 
     fun parseSidPortalPage(html: String): SidPortalPage {
-        val doc = Jsoup.parse(html)
+        val doc = Ksoup.parse(html)
         fun text(id: String) = doc.selectFirst("#$id")?.text()?.trim().orEmpty()
         val code = text("login-error-msg").ifEmpty { text("login-error-code") }
         return SidPortalPage(
@@ -70,7 +63,7 @@ object TheolParser {
 
     /** 解析 interaction_reminder_v8.jsp 中的待办作业与测验课程 LID */
     fun parsePendingCourses(html: String, baseUrl: String = BASE_URL): Pair<List<TheolCourseInfo>, List<TheolCourseInfo>> {
-        val doc = Jsoup.parse(html, baseUrl)
+        val doc = Ksoup.parse(html, baseUrl)
         val homeworks = mutableListOf<TheolCourseInfo>()
         val tests = mutableListOf<TheolCourseInfo>()
         val seenHw = mutableSetOf<String>()
@@ -98,7 +91,7 @@ object TheolParser {
      * 用于补齐“所有作业均已交完、不再出现在 interaction_reminder_v8.jsp 待办提醒中”的在修课程。
      */
     fun parseCatalogCourses(html: String, sourceUrl: String = BASE_URL): List<TheolCourseInfo> {
-        val doc = Jsoup.parse(html, sourceUrl)
+        val doc = Ksoup.parse(html, sourceUrl)
         val courses = mutableListOf<TheolCourseInfo>()
         val seen = mutableSetOf<String>()
         val cleanBase = BASE_URL.trimEnd('/')
@@ -121,7 +114,7 @@ object TheolParser {
         for (a in doc.select("a[href]")) {
             val resolved = resolveHttpUrl(a.attr("href"), sourceUrl)
             if (resolved.isNotEmpty()) {
-                val path = runCatching { URI(resolved).path }.getOrNull().orEmpty()
+                val path = urlPathOf(resolved)
                 val isCourseLink = path.equals(COURSE_HOME_PATH, ignoreCase = true) ||
                     path.endsWith("/lesson/init_course.jsp", ignoreCase = true) ||
                     path.endsWith("/homepage/course/course_index.jsp", ignoreCase = true)
@@ -150,13 +143,13 @@ object TheolParser {
      * 从课程主页 HTML 中精确定位“课程作业 / 作业提交”相关栏目链接，避免无意义遍历所有教学栏目。
      */
     fun extractHomeworkColumnUrls(courseHomeHtml: String, sourceUrl: String): List<String> {
-        val doc = Jsoup.parse(courseHomeHtml, sourceUrl)
+        val doc = Ksoup.parse(courseHomeHtml, sourceUrl)
         val urls = LinkedHashSet<String>()
         for (a in doc.select("a[href]")) {
             val rawHref = a.attr("href").trim()
             if (rawHref.isEmpty() || rawHref.startsWith("#") || rawHref.startsWith("javascript:", true)) continue
             val text = a.text().trim()
-            val hrefLower = rawHref.lowercase(Locale.ROOT)
+            val hrefLower = rawHref.lowercase()
             val isHwText = text.contains("作业") && !text.contains("测试")
             val isHwHref = hrefLower.contains("hwtask")
             if (!isHwText && !isHwHref) continue
@@ -172,7 +165,7 @@ object TheolParser {
     /** 构造课程在线测验列表入口（MEOL 无独立的 test_start.jsp 页面，统一由列表页点击开始） */
     fun buildTestListUrl(lid: String, baseUrl: String = BASE_URL): String {
         val cleanBase = baseUrl.trimEnd('/')
-        val encodedLid = URLEncoder.encode(lid.trim(), "UTF-8")
+        val encodedLid = urlEncode(lid.trim())
         return "$cleanBase/meol/common/question/test/student/list.jsp" +
             "?sortColumn=createTime&status=1&tagbug=client&sortDirection=-1&strStyle=new03" +
             "&cateId=$encodedLid&pagingPage=1&pagingNumberPer=30"
@@ -203,7 +196,7 @@ object TheolParser {
         courseName: String,
         nowMillis: Long
     ): List<TheolHomeworkItem> =
-        parseHomeworkPage(Jsoup.parse(html, sourceUrl), sourceUrl, lid, courseName, nowMillis)
+        parseHomeworkPage(Ksoup.parse(html, sourceUrl), sourceUrl, lid, courseName, nowMillis)
 
     /** 复用已构建的 Jsoup Document 解析作业列表，避免重复解析整页 HTML */
     fun parseHomeworkPage(
@@ -409,7 +402,7 @@ object TheolParser {
 
     /** 判断页面是否因登录超时、权限拒绝或跳转统一认证页导致无法访问内容 */
     fun isPermissionDeniedOrExpired(html: String): Boolean {
-        val lower = html.lowercase(Locale.ROOT)
+        val lower = html.lowercase()
         return lower.contains("permission denied") ||
             html.contains("登录时间超时") ||
             html.contains("请重新登录") ||
@@ -427,7 +420,7 @@ object TheolParser {
         hwtid: String,
         nowMillis: Long
     ): TheolHomeworkDetail {
-        val doc = Jsoup.parse(html, detailUrl)
+        val doc = Ksoup.parse(html, detailUrl)
         var title = ""
         var deadline = ""
         var score = ""
@@ -488,11 +481,11 @@ object TheolParser {
             val raw = hidden.attr("value").trim()
             if (raw.isEmpty()) continue
             val decoded = if (raw.contains("&lt;") || raw.contains("&gt;") || raw.contains("&amp;")) {
-                Parser.unescapeEntities(raw, false)
+                htmlUnescape(raw)
             } else {
                 raw
             }
-            val fragment = Jsoup.parseBodyFragment(decoded, detailUrl)
+            val fragment = Ksoup.parseBodyFragment(decoded, detailUrl)
             collectFromFragment(fragment.body())
         }
 
@@ -506,7 +499,7 @@ object TheolParser {
         for (a in doc.select("a[href]")) {
             val resolved = normalizeDetailHref(a.attr("href"))
             if (resolved.isEmpty()) continue
-            val lower = resolved.lowercase(Locale.ROOT)
+            val lower = resolved.lowercase()
             val isAttachment = lower.contains("download") ||
                 lower.contains("attach") ||
                 lower.contains("common/script/") ||
@@ -535,7 +528,7 @@ object TheolParser {
 
     /** 解析在线测验列表页（入口统一指向 list.jsp，避免 test_start.jsp 404 白屏） */
     fun parseTestList(html: String, lid: String, fallbackCourseName: String, baseUrl: String = BASE_URL): List<TheolTestItem> {
-        val doc: Document = Jsoup.parse(html, baseUrl)
+        val doc: Document = Ksoup.parse(html, baseUrl)
         val courseName = fallbackCourseName.trim().ifEmpty {
             val titleText = doc.title().trim()
             val stripped = titleText
@@ -603,7 +596,7 @@ object TheolParser {
         testId: String,
         nowMillis: Long
     ): TheolTestDetail {
-        val doc = Jsoup.parse(html, BASE_URL)
+        val doc = Ksoup.parse(html, BASE_URL)
         val title = doc.selectFirst("h1, h2, h3, .title")?.text()?.trim().orEmpty()
         val description = doc.selectFirst("div.content, div.description")?.text()?.trim().orEmpty()
             .ifEmpty { doc.selectFirst("div#body")?.text()?.trim().orEmpty() }
@@ -641,20 +634,7 @@ object TheolParser {
         )
     }
 
-    fun parseDeadlineMillis(raw: String): Long? {
-        val normalized = raw.trim().replace(Regex("""\s+"""), " ")
-        if (normalized.isEmpty()) return null
-        val tz = TimeZone.getTimeZone("GMT+8")
-        for (pattern in deadlineFormats) {
-            val sdf = SimpleDateFormat(pattern, Locale.CHINA).apply {
-                isLenient = false
-                timeZone = tz
-            }
-            val parsed = runCatching { sdf.parse(normalized)?.time }.getOrNull()
-            if (parsed != null) return parsed
-        }
-        return null
-    }
+    fun parseDeadlineMillis(raw: String): Long? = parseDateTimeLoose(raw)
 
     private fun firstActiveLink(links: List<Element>, sourceUrl: String): String {
         for (a in links) {
@@ -667,7 +647,7 @@ object TheolParser {
     private fun resolveActiveLink(a: Element, sourceUrl: String): String {
         if (a.hasAttr("disabled")) return ""
         if (a.attr("aria-disabled").equals("true", ignoreCase = true)) return ""
-        if (a.attr("class").lowercase(Locale.ROOT).contains("disabled")) return ""
+        if (a.attr("class").lowercase().contains("disabled")) return ""
         return resolveHttpUrl(a.attr("href"), sourceUrl)
     }
 
@@ -675,12 +655,9 @@ object TheolParser {
         val href = rawHref.trim()
         if (href.isEmpty() || href.startsWith("#") || href.startsWith("javascript:", true)) return ""
         return runCatching {
-            val resolved = URL(URL(sourceUrl), href)
-            if (resolved.protocol == "http" || resolved.protocol == "https") {
-                upgradeCourseScheme(resolved.toString())
-            } else {
-                ""
-            }
+            val resolved = resolveUrl(sourceUrl, href)
+            val scheme = urlSchemeOf(resolved)
+            if (scheme == "http" || scheme == "https") upgradeCourseScheme(resolved) else ""
         }.getOrDefault("")
     }
 
@@ -701,7 +678,7 @@ object TheolParser {
 
     /** 从课程首页（newpage/index.jsp）预渲染的 #menu.wrap-menu 中解析「单元学习」目录列表 */
     fun parseCourseUnits(courseHomeHtml: String, courseHomeUrl: String): List<TheolCourseUnit> {
-        val doc = Jsoup.parse(courseHomeHtml, courseHomeUrl)
+        val doc = Ksoup.parse(courseHomeHtml, courseHomeUrl)
         val unitLinks = doc.select("#menu ul#ul_advance li a[href]").ifEmpty {
             val parentId = doc.select("a[onclick]").firstNotNullOfOrNull { a ->
                 val text = a.text().trim()
@@ -747,7 +724,7 @@ object TheolParser {
             val textMatched = textKeywords.any { text.contains(it) }
             val resolvedHref = resolveHttpUrl(a.attr("href"), baseUrl)
             if (resolvedHref.isNotEmpty()) {
-                val lower = resolvedHref.lowercase(Locale.ROOT)
+                val lower = resolvedHref.lowercase()
                 if (textMatched || urlKeywords.any { lower.contains(it) }) {
                     urls.add(resolvedHref)
                 }
@@ -756,7 +733,7 @@ object TheolParser {
             if (onclick.isNotBlank()) {
                 for (m in RESOURCE_QUOTED_URL_REGEX.findAll(onclick)) {
                     val candidate = m.groupValues[1]
-                    val candidateLower = candidate.lowercase(Locale.ROOT)
+                    val candidateLower = candidate.lowercase()
                     if (candidateLower.contains("course_column_preview_transfer.jsp") ||
                         candidateLower.contains("colurlstuview.do") ||
                         candidateLower.contains("listview.jsp") ||
@@ -779,7 +756,7 @@ object TheolParser {
         fun acceptCourseUrl(raw: String): String? {
             val resolved = resolveHttpUrl(raw, baseUrl)
             if (resolved.isEmpty() || resolved == baseUrl) return null
-            val host = runCatching { URI(resolved).host }.getOrNull()?.lowercase(Locale.ROOT).orEmpty()
+            val host = urlHostOf(resolved)?.lowercase().orEmpty()
             return if (host == "course.buct.edu.cn") resolved else null
         }
 
@@ -787,8 +764,8 @@ object TheolParser {
         var fallbackFrameUrl: String? = null
         for (frame in frames) {
             val resolved = acceptCourseUrl(frame.attr("src")) ?: continue
-            val lower = resolved.lowercase(Locale.ROOT)
-            val nameOrId = (frame.attr("name") + " " + frame.attr("id")).lowercase(Locale.ROOT)
+            val lower = resolved.lowercase()
+            val nameOrId = (frame.attr("name") + " " + frame.attr("id")).lowercase()
             if (lower.contains("left.jsp") || nameOrId.contains("leftframe")) continue
             if (lower.contains("listview.jsp") || lower.contains("resourcelist") || nameOrId.contains("mainframe")) {
                 return resolved
@@ -819,15 +796,14 @@ object TheolParser {
 
     /** 从 download_preview.jsp 等预览页 HTML 中提取真实文件下载直链（限定 *.buct.edu.cn） */
     fun extractDirectDownloadUrl(html: String, pageUrl: String): String? {
-        val doc = Jsoup.parse(html, pageUrl)
+        val doc = Ksoup.parse(html, pageUrl)
         fun isDirectDownloadCandidate(raw: String): String? {
             val resolved = resolveHttpUrl(raw, pageUrl)
             if (resolved.isEmpty() || resolved == pageUrl) return null
-            val uri = runCatching { URI(resolved) }.getOrNull() ?: return null
-            val host = uri.host?.lowercase(Locale.ROOT).orEmpty()
+            val host = urlHostOf(resolved)?.lowercase().orEmpty()
             val isTrusted = host == "buct.edu.cn" || host.endsWith(".buct.edu.cn")
             if (!isTrusted) return null
-            val lower = resolved.lowercase(Locale.ROOT)
+            val lower = resolved.lowercase()
             if (lower.contains("download_preview.jsp")) return null
             val looksDirect = lower.contains("download.jsp") ||
                 lower.contains("download_file") ||
@@ -862,7 +838,7 @@ object TheolParser {
         courseName: String,
         fallbackFolderTitle: String? = null
     ): TheolResourcePage {
-        val doc = Jsoup.parse(html, pageUrl)
+        val doc = Ksoup.parse(html, pageUrl)
         val items = linkedMapOf<String, TheolResourceItem>()
         val knownExts = setOf(
             "pdf", "doc", "docx", "ppt", "pptx", "xls", "xlsx",
@@ -885,7 +861,7 @@ object TheolParser {
             if (links.isEmpty()) continue
             val directDownloadUrl = links.firstNotNullOfOrNull { a ->
                 val resolved = resolveHttpUrl(a.attr("href"), pageUrl)
-                val lower = resolved.lowercase(Locale.ROOT)
+                val lower = resolved.lowercase()
                 if (resolved.isNotEmpty() &&
                     !lower.contains("download_preview.jsp") &&
                     (lower.contains("download.jsp") || lower.contains("download_file") || lower.contains("file_download"))
@@ -914,7 +890,7 @@ object TheolParser {
                 if (rawDownloadUrl.isNotEmpty()) {
                     val downloadUrl = if (lid.isNotBlank() && !rawDownloadUrl.contains("lid=", ignoreCase = true)) {
                         val sep = if ('?' in rawDownloadUrl) '&' else '?'
-                        "$rawDownloadUrl${sep}lid=${URLEncoder.encode(lid, "UTF-8")}"
+                        "$rawDownloadUrl${sep}lid=${urlEncode(lid)}"
                     } else {
                         rawDownloadUrl
                     }
@@ -932,7 +908,7 @@ object TheolParser {
                             fallbackFolderTitle?.trim().orEmpty().ifEmpty { "课程资料" }
                         }
                     val ext = if ('.' in parsedFileName) {
-                        parsedFileName.substringAfterLast('.', "").lowercase(Locale.ROOT).takeIf { it.length in 1..6 }.orEmpty()
+                        parsedFileName.substringAfterLast('.', "").lowercase().takeIf { it.length in 1..6 }.orEmpty()
                     } else {
                         ""
                     }
@@ -984,14 +960,14 @@ object TheolParser {
         val name = link.text().trim()
         if (name.isEmpty() || name in ignoredTexts || name.startsWith("返回上一级")) return null
 
-        val lower = resolved.lowercase(Locale.ROOT)
+        val lower = resolved.lowercase()
         val isFile = lower.contains("download_preview.jsp") ||
             lower.contains("download.jsp") ||
             lower.contains("download_file") ||
             lower.contains("file_download") ||
             lower.contains("fileid=") ||
             lower.contains("resid=") ||
-            knownExts.any { name.lowercase(Locale.ROOT).endsWith(".$it") }
+            knownExts.any { name.lowercase().endsWith(".$it") }
         val isFolder = !isFile && (
             lower.contains("folderid=") ||
                 lower.contains("dirid=") ||
@@ -1026,7 +1002,7 @@ object TheolParser {
             it.matches(Regex("""\d{4}[-/]\d{1,2}[-/]\d{1,2}.*"""))
         }.orEmpty()
         val nameExt = if (!isFolder && '.' in name) {
-            name.substringAfterLast('.', "").lowercase(Locale.ROOT).takeIf { it.length in 1..6 }.orEmpty()
+            name.substringAfterLast('.', "").lowercase().takeIf { it.length in 1..6 }.orEmpty()
         } else {
             ""
         }
@@ -1049,22 +1025,19 @@ object TheolParser {
     }
 
     private fun rewritePreviewToDirectDownload(url: String): String {
-        val uri = runCatching { URI(url) }.getOrNull() ?: return url
-        val path = uri.path.orEmpty()
+        val path = urlPathOf(url)
         if (!path.endsWith("/preview/download_preview.jsp", ignoreCase = true)) return url
-        val query = uri.rawQuery.orEmpty()
+        val query = urlQueryOf(url).orEmpty()
         if (!query.contains("fileid=", ignoreCase = true) && !query.contains("resid=", ignoreCase = true)) {
             return url
         }
         val newPath = path.substringBeforeLast("/preview/download_preview.jsp") + "/download.jsp"
-        return runCatching {
-            URI(uri.scheme, uri.authority, newPath, uri.query, null).toString()
-        }.getOrDefault(url)
+        return runCatching { replaceUrlPath(url, newPath) }.getOrDefault(url)
     }
 
     private fun inferExtFromIcon(row: Element?): String {
         val src = row?.selectFirst("img[src*=/icons/], img[src*=icon]")
-            ?.attr("src")?.lowercase(Locale.ROOT).orEmpty()
+            ?.attr("src")?.lowercase().orEmpty()
         if (src.isEmpty()) return ""
         return when {
             src.contains("pdf") -> "pdf"
@@ -1082,7 +1055,7 @@ object TheolParser {
 
     private fun extractPositiveIdParam(href: String, paramName: String): String {
         if (href.isEmpty()) return ""
-        val query = runCatching { URI(href).rawQuery }.getOrNull().orEmpty()
+        val query = urlQueryOf(href).orEmpty()
         val id = query.split('&')
             .firstOrNull { it.startsWith("$paramName=") }
             ?.substringAfter("$paramName=")

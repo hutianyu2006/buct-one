@@ -14,7 +14,7 @@ import com.buct.one.platform.crypto.base64Decode
  * 新中新校园卡查询平台（ecard.buct.edu.cn）响应解密与数据解析器。
  */
 object EcardParser {
-    const val PARSER_VERSION = 2
+    const val PARSER_VERSION = 3
 
     private val RESULT_AES_KEY = "abcdef0123456789".toByteArray(Charsets.UTF_8)
     private val RESULT_AES_IV = "0123456789abcdef".toByteArray(Charsets.UTF_8)

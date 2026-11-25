@@ -37,7 +37,8 @@ CI 里 `Package dependency rules` 这一步会 grep 检查，违反即失败。
 ## 跨端（Android / iOS）
 
 - 双端复用的逻辑一律写在 `shared/src/commonMain`：数据模型（`com.buct.one.data.model`，零 import 约束不变）、响应解析器（`com.buct.one.data.source.<域>`）、公告通道。
-- 解析层只允许使用 `com.buct.one.data.json`（kotlinx.serialization 的 org.json 只读外观）、`com.buct.one.data.text` 与 Ksoup；**禁止** `org.json`、`org.jsoup`、`java.*`、`android.*`。
+- 解析层只允许使用 `com.buct.one.data.json`（kotlinx.serialization 的 org.json 只读外观）、`com.buct.one.data.text`、`com.buct.one.platform` 抽象与 Ksoup；**禁止** `org.json`、`org.jsoup`、`java.*`、`android.*`、`javax.*`。
+- 平台能力（存储 / 日志 / 调度 / HTTP / 加密）只用 `com.buct.one.platform` 下的接口；Android 侧网络必须注入挂了 `BuctTlsTrustManager`/`BuctDns` 的 Ktor 引擎。
 - Android 通过 `:shared` 的 JVM 变体消费，iOS 通过 `Shared.framework`；新增解析器必须在 `shared/src/commonTest` 补样本单测，CI 的 `:shared:jvmTest` 会执行。
 - iOS 专属实现（Compose Multiplatform UI、Darwin 网络）放 `shared/src/iosMain`；`iosApp/` 只保留 SwiftUI 壳与 Xcode 工程。
 
