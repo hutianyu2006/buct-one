@@ -818,6 +818,26 @@ jobs:
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
             build
 
+      # Compose Multiplatform 1.12+ 在创建 ComposeUIViewController 时会强制校验该键，
+      # 缺失会直接抛 IllegalStateException 导致开屏闪退，必须在 CI 拦住。
+      - name: Verify iOS Info.plist frame-rate key
+        run: |
+          set -euo pipefail
+          check() {
+            local app="$1"
+            local value
+            value=$(/usr/libexec/PlistBuddy -c "Print :CADisableMinimumFrameDurationOnPhone" "$app/Info.plist")
+            echo "$app: CADisableMinimumFrameDurationOnPhone=$value"
+            if [ "$value" != "true" ]; then
+              echo "::error::Info.plist 缺少 CADisableMinimumFrameDurationOnPhone=true，Compose 启动时会抛异常"
+              exit 1
+            fi
+          }
+          SIM_APP=$(find "$RUNNER_TEMP/DerivedData/Build/Products/Debug-iphonesimulator" -maxdepth 1 -name "*.app" | head -1)
+          DEV_APP=$(find "$RUNNER_TEMP/DerivedDataDevice/Build/Products/Debug-iphoneos" -maxdepth 1 -name "*.app" | head -1)
+          check "$SIM_APP"
+          check "$DEV_APP"
+
       - name: Package IPA and simulator app
         run: |
           set -euo pipefail

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Compose Multiplatform 1.12+ 在创建 ComposeUIViewController 时强制校验该键。
+	     它不在 Xcode 的 INFOPLIST_KEY_ 白名单里，只能通过 INFOPLIST_FILE 基础 plist 注入；
+	     其余 Info.plist 键仍由 GENERATE_INFOPLIST_FILE 生成并合并。 -->
+	<key>CADisableMinimumFrameDurationOnPhone</key>
+	<true/>
+</dict>
+</plist>
