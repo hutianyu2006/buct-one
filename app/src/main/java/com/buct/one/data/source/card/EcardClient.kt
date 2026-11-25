@@ -255,7 +255,7 @@ internal class EcardClient {
         val total = resultObj?.optInt("total", 0) ?: 0
         val rows = resultObj?.optJSONArray("rows")
         val (items, safeTotal, hasMore) = EcardParser.parseTransactions(
-            rowsArray = rows,
+            rowsArray = rows?.toSharedJsonArray(),
             totalCount = total,
             pageNumber = pageNumber.coerceAtLeast(0),
             pageSize = pageSize.coerceIn(1, 50)
