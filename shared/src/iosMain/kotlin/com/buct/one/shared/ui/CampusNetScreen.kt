@@ -64,12 +64,20 @@ internal fun CampusNetScreen(
             }
         }
 
-        is CampusNetUiState.Loaded -> BillingContent(snapshot = state.snapshot, onRefresh = onRefresh)
+        is CampusNetUiState.Loaded -> BillingContent(
+            snapshot = state.snapshot,
+            refreshState = state.provenance.refreshState,
+            onRefresh = onRefresh,
+        )
     }
 }
 
 @Composable
-private fun BillingContent(snapshot: CampusNetSnapshot, onRefresh: () -> Unit) {
+private fun BillingContent(
+    snapshot: CampusNetSnapshot,
+    refreshState: com.buct.one.data.model.RefreshState,
+    onRefresh: () -> Unit,
+) {
     val colors = MaterialTheme.colorScheme
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -82,12 +90,15 @@ private fun BillingContent(snapshot: CampusNetSnapshot, onRefresh: () -> Unit) {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    text = "校园网",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = colors.onBackground,
-                )
+                Column {
+                    Text(
+                        text = "校园网",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = colors.onBackground,
+                    )
+                    FreshnessHint(refreshState)
+                }
                 TextButton(onClick = onRefresh) { Text("刷新") }
             }
         }

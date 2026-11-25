@@ -31,12 +31,23 @@ class JwNoticeSnapshotStore(
         }
     }
 
-    fun save(snapshot: JwNoticeSnapshot) {
+    fun save(snapshot: JwNoticeSnapshot, capturedAt: Long = 0L) {
         store.putString(key, encode(snapshot).toString())
+        if (capturedAt > 0L) {
+            store.putLong(capturedAtKey(), capturedAt)
+        } else {
+            store.remove(capturedAtKey())
+        }
     }
+
+    /** 缓存快照的采集时间（未知时返回 0）。 */
+    fun capturedAt(): Long = store.getLong(capturedAtKey(), 0L)
+
+    private fun capturedAtKey(): String = "$key.capturedAt"
 
     fun clear() {
         store.remove(key)
+        store.remove(capturedAtKey())
     }
 
     private fun encode(snapshot: JwNoticeSnapshot): JsonObject = buildJsonObject {

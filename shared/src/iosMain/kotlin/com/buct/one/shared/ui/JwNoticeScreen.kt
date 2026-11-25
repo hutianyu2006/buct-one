@@ -30,6 +30,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.buct.one.data.model.JwAnnouncementDetail
+import com.buct.one.data.model.RefreshState
 import com.buct.one.data.model.JwAnnouncementItem
 import com.buct.one.data.model.JwReminderItem
 import com.buct.one.data.source.jwnotice.JwNoticeUiState
@@ -111,12 +112,15 @@ internal fun JwNoticeScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(
-                        text = "教务消息",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = colors.onBackground,
-                    )
+                    Column {
+                        Text(
+                            text = "教务消息",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = colors.onBackground,
+                        )
+                        FreshnessHint(state.provenance.refreshState)
+                    }
                     TextButton(onClick = onRefresh) { Text("刷新") }
                 }
             }
@@ -136,6 +140,22 @@ internal fun JwNoticeScreen(
             }
         }
     }
+}
+
+/** 数据新鲜度提示：只有「缓存/旧数据/失败兜底」才提示，正常新鲜时保持界面干净。 */
+@Composable
+internal fun FreshnessHint(state: RefreshState) {
+    val text = when (state) {
+        RefreshState.STALE -> "正在刷新，先显示上次缓存"
+        RefreshState.FAILED_FALLBACK -> "本次同步失败，显示的是上次数据"
+        RefreshState.EMPTY_CONFIRMED -> "服务端确认暂无数据"
+        RefreshState.FRESH, RefreshState.NEVER -> null
+    } ?: return
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 }
 
 @Composable
