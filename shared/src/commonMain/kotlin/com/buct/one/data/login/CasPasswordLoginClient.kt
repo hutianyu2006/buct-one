@@ -1,6 +1,9 @@
 package com.buct.one.data.login
 
+import com.buct.one.data.text.resolveUrl
 import com.buct.one.data.text.urlEncode
+import com.buct.one.data.text.urlHostOf
+import com.buct.one.data.text.urlSchemeOf
 import io.ktor.client.HttpClient
 import io.ktor.client.request.forms.submitForm
 import io.ktor.client.request.get
@@ -40,6 +43,7 @@ class CasPasswordLoginClient(
     private val portalBaseUrl: String = DEFAULT_PORTAL,
     private val serviceUrl: String = DEFAULT_SERVICE,
     private val maxRedirects: Int = 5,
+    private val followServiceRedirects: Boolean = true,
 ) {
     suspend fun login(
         username: String,
@@ -68,9 +72,42 @@ class CasPasswordLoginClient(
         }
 
         val code = response.status.value
-        if (code in 300..399) return CasLoginOutcome.Success
+        if (code in 300..399) {
+            // CAS 只负责发票据；继续跟随到目标业务系统，才能拿到 jwglxt 等站点的会话 Cookie。
+            if (followServiceRedirects) {
+                try {
+                    followSessionRedirects(response.headers[HttpHeaders.Location])
+                } catch (_: Exception) {
+                    // 业务系统临时不可达不影响"统一认证已通过"的结论，交由后续业务请求报错。
+                }
+            }
+            return CasLoginOutcome.Success
+        }
         return classify(response.bodyAsText())
     }
+
+    /** 登录成功后跟随 CAS 票据跳转到业务系统（仅限 *.buct.edu.cn，且强制 https）。 */
+    private suspend fun followSessionRedirects(initialLocation: String?) {
+        var current: String = resolveUrl(portalBaseUrl, initialLocation ?: return)
+        repeat(maxRedirects) {
+            if (!isAllowedHost(current)) return
+            val response = httpClient.get(forceHttps(current)) {
+                header(HttpHeaders.UserAgent, userAgent)
+            }
+            val code = response.status.value
+            if (code !in 300..399) return
+            val next = response.headers[HttpHeaders.Location] ?: return
+            current = resolveUrl(current, next)
+        }
+    }
+
+    private fun isAllowedHost(url: String): Boolean {
+        val host = urlHostOf(url)?.lowercase() ?: return false
+        return host == "buct.edu.cn" || host.endsWith(".buct.edu.cn")
+    }
+
+    private fun forceHttps(url: String): String =
+        if (urlSchemeOf(url) == "http" && isAllowedHost(url)) url.replaceFirst("http://", "https://") else url
 
     private suspend fun fetchLoginPage(loginUrl: String): String {
         var target = loginUrl
