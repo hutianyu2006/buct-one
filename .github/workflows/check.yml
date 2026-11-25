@@ -142,14 +142,15 @@ jobs:
 
       - name: Compile Debug Sources
         run: |
+          set -o pipefail
           chmod +x ./gradlew
-          ./gradlew :app:compileDebugSources --no-daemon --stacktrace --build-cache
+          ./gradlew :app:compileDebugSources --no-daemon --stacktrace --build-cache 2>&1 | tee "$RUNNER_TEMP/check-build.log"
 
       - name: Shared module JVM tests
         run: |
           set -o pipefail
           chmod +x ./gradlew
-          ./gradlew :shared:jvmTest --no-daemon --stacktrace --build-cache 2>&1 | tee "$RUNNER_TEMP/check-build.log"
+          ./gradlew :shared:jvmTest --no-daemon --stacktrace --build-cache 2>&1 | tee -a "$RUNNER_TEMP/check-build.log"
 
       - name: Publish build log on failure
         if: failure()
