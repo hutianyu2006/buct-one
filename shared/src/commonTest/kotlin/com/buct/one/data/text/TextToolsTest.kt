@@ -11,14 +11,16 @@ class TextToolsTest {
         val epochMillis = 1795539232996L // 2026-11-25 00:53:52 +08:00
         val text = formatDateTime(epochMillis)
         assertEquals("2026-11-25 00:53:52", text)
-        assertEquals(epochMillis, parseDateTime(text))
+        // formatDateTime 精确到秒，回环比较时按秒对齐
+        assertEquals(epochMillis / 1000L * 1000L, parseDateTime(text))
         assertNull(parseDateTime("2026-13-01 00:00:00"))
     }
 
     @Test
     fun resolveUrl_handlesAbsoluteRelativeAndDotSegments() {
+        // RFC 3986：相对路径引用会丢弃 base 的 query
         assertEquals(
-            "https://a.example.com/x/y?q=1",
+            "https://a.example.com/x/y",
             resolveUrl("https://a.example.com/x/z?q=1", "y"),
         )
         assertEquals(
