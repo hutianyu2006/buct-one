@@ -22,12 +22,15 @@ import androidx.compose.ui.Modifier
 import com.buct.one.data.login.CasLoginController
 import com.buct.one.data.login.CasPasswordLoginClient
 import com.buct.one.data.login.LoginState
+import com.buct.one.data.source.campusnet.CampusNetController
+import com.buct.one.data.source.campusnet.CampusNetGateway
 import com.buct.one.data.source.jwnotice.JwNoticeController
 import com.buct.one.data.source.jwnotice.JwNoticeGateway
 import com.buct.one.platform.createIosSessionClient
 import com.buct.one.shared.notice.AppNotice
 import com.buct.one.shared.notice.NoticeRepository
 import com.buct.one.shared.ui.BuctOneTheme
+import com.buct.one.shared.ui.CampusNetScreen
 import com.buct.one.shared.ui.HomeScreen
 import com.buct.one.shared.ui.JwNoticeScreen
 import com.buct.one.shared.ui.LoginScreen
@@ -41,7 +44,7 @@ internal sealed interface NoticeUiState {
     data class Failed(val message: String) : NoticeUiState
 }
 
-private enum class HomeSection { Notices, JwNotices }
+private enum class HomeSection { Notices, JwNotices, CampusNet }
 
 /** iOS 端的 Compose 根节点，被 MainViewController 直接嵌入 UIViewController。 */
 @Composable
@@ -61,9 +64,13 @@ fun App() {
         val jwController = remember {
             JwNoticeController(JwNoticeGateway(httpClient = sessionClient, userAgent = iosUserAgent()))
         }
+        val campusNetController = remember {
+            CampusNetController(CampusNetGateway(httpClient = sessionClient, userAgent = iosUserAgent()))
+        }
         val scope = rememberCoroutineScope()
         val loginState by loginController.state.collectAsState()
         val jwState by jwController.state.collectAsState()
+        val campusNetState by campusNetController.state.collectAsState()
 
         var state by remember { mutableStateOf<NoticeUiState>(NoticeUiState.Loading) }
         var reloadKey by remember { mutableStateOf(0) }
@@ -84,8 +91,10 @@ fun App() {
         }
 
         LaunchedEffect(section, loggedInUsername) {
-            if (section == HomeSection.JwNotices && loggedInUsername != null) {
-                jwController.refresh()
+            when {
+                section == HomeSection.JwNotices && loggedInUsername != null -> jwController.refresh()
+                section == HomeSection.CampusNet && loggedInUsername != null ->
+                    campusNetController.refresh(loggedInUsername)
             }
         }
 
@@ -97,7 +106,7 @@ fun App() {
             ) {
                 if (loggedInUsername != null) {
                     TabRow(
-                        selectedTabIndex = if (section == HomeSection.Notices) 0 else 1,
+                        selectedTabIndex = section.ordinal,
                         containerColor = MaterialTheme.colorScheme.background,
                     ) {
                         Tab(
@@ -109,6 +118,11 @@ fun App() {
                             selected = section == HomeSection.JwNotices,
                             onClick = { section = HomeSection.JwNotices },
                             text = { Text("教务消息") },
+                        )
+                        Tab(
+                            selected = section == HomeSection.CampusNet,
+                            onClick = { section = HomeSection.CampusNet },
+                            text = { Text("校园网") },
                         )
                     }
                 }
@@ -123,6 +137,11 @@ fun App() {
                                     state = jwState,
                                     onRefresh = { scope.launch { jwController.refresh() } },
                                     loadDetail = { item -> jwController.fetchDetail(item) },
+                                )
+                            } else if (section == HomeSection.CampusNet && loggedInUsername != null) {
+                                CampusNetScreen(
+                                    state = campusNetState,
+                                    onRefresh = { scope.launch { campusNetController.refresh(loggedInUsername) } },
                                 )
                             } else {
                                 HomeScreen(
