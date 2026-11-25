@@ -87,7 +87,7 @@ internal object Sm2 {
         var addend: Point? = point
         var remaining = scalar
         while (remaining > zero) {
-            if (remaining % 2 == one) result = add(result, addend)
+            if ((remaining and one) == one) result = add(result, addend)
             addend = add(addend, addend)
             remaining = remaining shr 1
         }

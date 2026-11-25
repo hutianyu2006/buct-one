@@ -20,11 +20,11 @@ class Sm2LoginCryptoTest {
     fun ciphertextFormatMatchesSchoolLayout() {
         // 用曲线基点 G 作为公钥（合法点），只校验长度与结构
         val publicKey = base64Encode(
-            hexToBytes(
+            (
                 "04" +
                     "32C4AE2C1F1981195F9904466A39C9948FE30BBFF2660BE1715A4589334C74C7" +
-                    "BC3736A2F4F6779C59BDCEE36B692153D0A9877CC62A474002DF32E52139F0A0",
-            ),
+                    "BC3736A2F4F6779C59BDCEE36B692153D0A9877CC62A474002DF32E52139F0A0"
+                ).hexToBytes(),
         )
         val cipher = base64Decode(Sm2LoginCrypto.encrypt("北化一站", publicKey))
         // C1(64) + C3(32) + C2(明文长度)
