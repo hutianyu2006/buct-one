@@ -1,38 +1,18 @@
 package com.buct.one.platform
 
-import com.buct.one.platform.network.IosServerTrustEvaluator
 import io.ktor.client.engine.HttpClientEngine
 import io.ktor.client.engine.darwin.Darwin
-import platform.Foundation.NSURLAuthenticationMethodServerTrust
-import platform.Foundation.NSURLCredential
-import platform.Foundation.NSURLProtectionSpace
-import platform.Foundation.NSURLSessionAuthChallengePerformDefaultHandling
-import platform.Foundation.NSURLSessionAuthChallengeCancelAuthenticationChallenge
-import platform.Foundation.NSURLSessionAuthChallengeDisposition
-import platform.Foundation.NSURLAuthenticationChallenge
 
 /**
  * iOS 默认引擎：NSURLSession（系统 TLS / ATS 生效）。
  *
- * 追加一层服务端证书兜底（见 [IosServerTrustEvaluator]）：
- * 系统校验失败时，**仅对 `*.buct.edu.cn`** 用内置 GlobalSign R3 / Sectigo E46 信任点重试，
- * 其余一律走系统默认处理，绝不无条件接受。
+ * 说明：校内证书链的兜底校验（GlobalSign R3 / Sectigo E46）在 iOS 上依赖
+ * `NSURLProtectionSpace.serverTrust` 与 `NSURLCredential.credentialForTrust`，
+ * 当前 Kotlin/Native 平台绑定未暴露这两个符号，因此自定义 challenge 放到 Phase 5
+ * 由 Swift 侧的 `URLSessionDelegate` 实现；此处保持系统默认处理（ATS 仍然严格校验，
+ * 不会降级为信任任意证书）。
+ *
+ * 共享层的 [com.buct.one.platform.network.BuctCertificatePins] 提供同一份证书链，
+ * 供 Android 的 `BuctTlsTrustManager` 与将来的 Swift 实现共同使用。
  */
-actual fun createPlatformHttpEngine(): HttpClientEngine = Darwin.create {
-    handleChallenge { _, _, challenge: NSURLAuthenticationChallenge, completionHandler ->
-        val space: NSURLProtectionSpace = challenge.protectionSpace
-        if (space.authenticationMethod != NSURLAuthenticationMethodServerTrust) {
-            completionHandler(NSURLSessionAuthChallengePerformDefaultHandling, null)
-            return@handleChallenge
-        }
-        val trust = space.serverTrust
-        val accepted = IosServerTrustEvaluator.evaluate(trust, space.host)
-        if (accepted) {
-            // 复用系统给出的服务端信任凭据（不再放宽任何校验）
-            val credential: NSURLCredential? = trust?.let { NSURLCredential.credentialForTrust(it) }
-            completionHandler(NSURLSessionAuthChallengePerformDefaultHandling, credential)
-        } else {
-            completionHandler(NSURLSessionAuthChallengeCancelAuthenticationChallenge, null)
-        }
-    }
-}
+actual fun createPlatformHttpEngine(): HttpClientEngine = Darwin.create()
