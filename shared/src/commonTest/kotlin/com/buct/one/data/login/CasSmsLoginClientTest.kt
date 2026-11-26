@@ -88,11 +88,13 @@ class CasSmsLoginClientTest {
 
         // 业务号必须是 0008
         assertTrue(recorder.smsSendPath.endsWith("/DEFAULT/abcd/20230001/0008"), recorder.smsSendPath)
-        // 四步请求共用同一个固定 Device-Id
-        assertEquals(1, recorder.deviceIds.toSet().size)
-        assertEquals(CasSmsLoginClient.FIXED_DEVICE_ID, recorder.deviceIds.first())
+        // 三个短信 API（生成图形码 / 发短信 / 校验）必须共用同一个固定 Device-Id；
+        // 登录页与表单提交按校方协议不带该头（与 Android 实现一致）。
+        val smsApiDeviceIds = recorder.deviceIds.filter { it.isNotBlank() }
+        assertEquals(3, smsApiDeviceIds.size)
+        assertEquals(setOf(CasSmsLoginClient.FIXED_DEVICE_ID), smsApiDeviceIds.toSet())
         // 同一个 Csrf-Key 贯穿（同一实例缓存）
-        assertEquals(1, recorder.csrfKeys.toSet().size)
+        assertEquals(1, recorder.csrfKeys.filter { it.isNotBlank() }.toSet().size)
 
         val form = parseForm(recorder.postedForm)
         assertEquals("smsLogin", form["type"])
