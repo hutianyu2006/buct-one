@@ -48,10 +48,6 @@ concurrency:
   group: code-check-${{ github.ref }}
   cancel-in-progress: true
 
-permissions:
-  contents: write
-
-
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -142,26 +138,10 @@ jobs:
 
       - name: Compile Debug Sources
         run: |
-          set -o pipefail
           chmod +x ./gradlew
-          ./gradlew :app:compileDebugSources --no-daemon --stacktrace --build-cache 2>&1 | tee "$RUNNER_TEMP/check-build.log"
+          ./gradlew :app:compileDebugSources --no-daemon --stacktrace --build-cache
 
       - name: Shared module JVM tests
         run: |
-          set -o pipefail
           chmod +x ./gradlew
-          ./gradlew :shared:jvmTest --no-daemon --stacktrace --build-cache 2>&1 | tee -a "$RUNNER_TEMP/check-build.log"
-
-      - name: Publish build log on failure
-        if: failure()
-        run: |
-          LOG="$RUNNER_TEMP/check-build.log"
-          [ -f "$LOG" ] || exit 0
-          tail -c 300000 "$LOG" > ci-check-build.log
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout -B ci-check-log
-          git add -f ci-check-build.log
-          git commit -m "ci: code-check 失败日志（自动生成，可忽略）" || exit 0
-          git push --force origin ci-check-log
-
+          ./gradlew :shared:jvmTest --no-daemon --stacktrace --build-cache
