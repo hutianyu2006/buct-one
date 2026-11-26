@@ -29,6 +29,7 @@ import com.buct.one.data.store.JwNoticeSnapshotStore
 import com.buct.one.data.source.jwnotice.JwNoticeController
 import com.buct.one.data.source.jwnotice.JwNoticeGateway
 import com.buct.one.platform.UserDefaultsKeyValueStore
+import com.buct.one.platform.clearIosSessionCookies
 import com.buct.one.platform.createIosSessionClient
 import com.buct.one.shared.notice.AppNotice
 import com.buct.one.shared.notice.NoticeRepository
@@ -167,6 +168,7 @@ fun App() {
                                     onLogout = {
                                         loginController.reset()
                                         jwController.reset()
+                                        clearIosSessionCookies()
                                         section = HomeSection.Notices
                                         skippedLogin = false
                                     },
