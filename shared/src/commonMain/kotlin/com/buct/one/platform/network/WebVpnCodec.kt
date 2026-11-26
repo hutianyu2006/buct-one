@@ -55,9 +55,8 @@ object WebVpnCodec {
         val plain = runCatching {
             AesCbc.decryptCfbNoPadding(cipherBytes, keyBytes, tokenIv).decodeToString().trim()
         }.getOrNull() ?: return null
-        if (plain.isEmpty()) return null
-        if (plain.any { it <= ' ' || it == '/' || it == '\\' }) return null
-        return plain
+        // 只接受合法主机名：CFB 解出的垃圾字节不应被当成域名（否则可能拼出越权地址）。
+        return plain.takeIf(::isValidHostName)
     }
 
     /** 原始 URL → WebVPN 代理 URL（已是代理地址时原样返回）。 */
@@ -158,6 +157,13 @@ object WebVpnCodec {
         }
         val path = rest.ifEmpty { "/" }
         return UrlParts(scheme.lowercase(), hostPart.lowercase(), port, path, query, fragment)
+    }
+
+    private fun isValidHostName(value: String): Boolean {
+        if (value.isEmpty() || value.length > 253) return false
+        if (!value.contains('.')) return false
+        if (value.startsWith('.') || value.endsWith('.') || value.startsWith('-') || value.endsWith('-')) return false
+        return value.all { it in 'a'..'z' || it in '0'..'9' || it == '.' || it == '-' }
     }
 
     private fun ByteArray.toLowerHex(): String = buildString(size * 2) {
