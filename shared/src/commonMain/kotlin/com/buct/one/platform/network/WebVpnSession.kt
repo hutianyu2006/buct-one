@@ -231,7 +231,7 @@ class WebVpnSession(
                 return null
             }
             val form = try {
-                CasLoginForm.build(page, username, String(passwordChars))
+                CasLoginForm.build(page, username, passwordChars.concatToString())
             } catch (error: Exception) {
                 lastFailureReason = "relogin-no-params"
                 return null
