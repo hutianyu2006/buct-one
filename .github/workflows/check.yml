@@ -157,7 +157,7 @@ jobs:
         run: |
           LOG="$RUNNER_TEMP/check-build.log"
           [ -f "$LOG" ] || exit 0
-          grep -E "^e: |FAILED|AssertionError|expected:" "$LOG" | tail -c 200000 > ci-check-build.log || cp "$LOG" ci-check-build.log
+          tail -c 300000 "$LOG" > ci-check-build.log
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -B ci-check-log
