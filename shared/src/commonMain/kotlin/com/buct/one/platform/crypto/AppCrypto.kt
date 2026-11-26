@@ -16,6 +16,9 @@ interface AppCrypto {
 
     fun aesEcbDecrypt(cipherBytes: ByteArray, key: ByteArray): ByteArray
 
+    /** 仅用于复刻校方前端 Csrf-Value（MD5），不用于安全目的。 */
+    fun md5(bytes: ByteArray): ByteArray
+
     fun sha256(bytes: ByteArray): ByteArray
 
     fun hmacSha256(key: ByteArray, message: ByteArray): ByteArray
@@ -31,6 +34,8 @@ object BuiltinCrypto : AppCrypto {
 
     override fun aesEcbDecrypt(cipherBytes: ByteArray, key: ByteArray): ByteArray =
         AesCbc.decryptEcbPkcs7(cipherBytes, key)
+
+    override fun md5(bytes: ByteArray): ByteArray = Md5.hash(bytes)
 
     override fun sha256(bytes: ByteArray): ByteArray = Sha256.hash(bytes)
 
@@ -53,6 +58,9 @@ fun String.hexToBytes(): ByteArray {
         substring(index * 2, index * 2 + 2).toInt(16).toByte()
     }
 }
+
+/** UTF-8 文本 → MD5 十六进制（仅用于复刻校方前端 Csrf-Value，不用于安全目的）。 */
+fun AppCrypto.md5Hex(text: String): String = md5(text.encodeToByteArray()).toHexString()
 
 /** UTF-8 文本 → SHA-256 十六进制（与 Android 侧 MessageDigest 行为一致）。 */
 fun AppCrypto.sha256Hex(text: String): String = sha256(text.encodeToByteArray()).toHexString()
