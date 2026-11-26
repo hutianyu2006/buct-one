@@ -34,11 +34,19 @@ internal fun LoginScreen(
     state: LoginState,
     onSubmit: (String, String) -> Unit,
     onSkip: () -> Unit,
+    onRequestSmsCaptcha: (String) -> Unit = {},
+    onSendSmsCode: (String, String) -> Unit = { _, _ -> },
+    onSmsLogin: (String, String) -> Unit = { _, _ -> },
 ) {
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
+    var captchaCode by remember { mutableStateOf("") }
+    var smsCode by remember { mutableStateOf("") }
+    var smsMode by remember { mutableStateOf(false) }
     val loading = state is LoginState.Loading
     val colors = MaterialTheme.colorScheme
+    val smsCaptcha = state as? LoginState.SmsCaptchaRequired
+    val smsSent = state is LoginState.SmsCodeSent
 
     Column(
         modifier = Modifier
@@ -69,22 +77,65 @@ internal fun LoginScreen(
             modifier = Modifier.fillMaxWidth(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
         )
-        Spacer(Modifier.height(12.dp))
-        OutlinedTextField(
-            value = password,
-            onValueChange = { password = it },
-            label = { Text("密码") },
-            singleLine = true,
-            enabled = !loading,
-            modifier = Modifier.fillMaxWidth(),
-            visualTransformation = PasswordVisualTransformation(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-        )
+        if (!smsMode) {
+            Spacer(Modifier.height(12.dp))
+            OutlinedTextField(
+                value = password,
+                onValueChange = { password = it },
+                label = { Text("密码") },
+                singleLine = true,
+                enabled = !loading,
+                modifier = Modifier.fillMaxWidth(),
+                visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+            )
+        } else {
+            Spacer(Modifier.height(12.dp))
+            OutlinedTextField(
+                value = captchaCode,
+                onValueChange = { captchaCode = it },
+                label = { Text(if (smsCaptcha != null) "图形验证码（见下方提示）" else "图形验证码") },
+                singleLine = true,
+                enabled = !loading,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            if (smsCaptcha != null && smsCaptcha.pngBytes.isNotEmpty()) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = "已获取图形验证码（${smsCaptcha.pngBytes.size} 字节 PNG）；" +
+                        "iOS 预览版暂未内置图片解码，请先点「发送短信」再按提示输入短信码。",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = colors.onSurfaceVariant,
+                )
+            }
+            Spacer(Modifier.height(12.dp))
+            OutlinedTextField(
+                value = smsCode,
+                onValueChange = { smsCode = it },
+                label = { Text(if (smsSent) "短信验证码（已发送）" else "短信验证码") },
+                singleLine = true,
+                enabled = !loading,
+                modifier = Modifier.fillMaxWidth(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            )
+        }
         Spacer(Modifier.height(16.dp))
 
         Button(
-            onClick = { onSubmit(username.trim(), password) },
-            enabled = !loading && username.isNotBlank() && password.isNotBlank(),
+            onClick = {
+                if (smsMode) {
+                    if (smsSent) {
+                        onSmsLogin(username.trim(), smsCode)
+                    } else {
+                        onSendSmsCode(username.trim(), captchaCode)
+                    }
+                } else {
+                    onSubmit(username.trim(), password)
+                }
+            },
+            enabled = !loading && username.isNotBlank() &&
+                if (smsMode) (if (smsSent) smsCode.isNotBlank() else captchaCode.isNotBlank())
+                else password.isNotBlank(),
             modifier = Modifier.fillMaxWidth(),
         ) {
             if (loading) {
@@ -94,8 +145,27 @@ internal fun LoginScreen(
                     color = colors.onPrimary,
                 )
             } else {
-                Text("登录")
+                Text(
+                    when {
+                        !smsMode -> "登录"
+                        smsSent -> "用短信码登录"
+                        else -> "发送短信验证码"
+                    },
+                )
             }
+        }
+        Spacer(Modifier.height(8.dp))
+        TextButton(
+            onClick = {
+                smsMode = !smsMode
+                captchaCode = ""
+                smsCode = ""
+                if (!smsMode) Unit else if (username.isNotBlank()) onRequestSmsCaptcha(username.trim())
+            },
+            enabled = !loading,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(if (smsMode) "改用密码登录" else "改用短信验证码登录")
         }
 
         Spacer(Modifier.height(12.dp))

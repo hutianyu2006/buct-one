@@ -21,6 +21,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import com.buct.one.data.login.CasLoginController
 import com.buct.one.data.login.CasPasswordLoginClient
+import com.buct.one.data.login.CasSmsLoginClient
 import com.buct.one.data.login.LoginState
 import com.buct.one.data.source.campusnet.CampusNetController
 import com.buct.one.data.source.campusnet.CampusNetGateway
@@ -62,7 +63,8 @@ fun App() {
         val sessionClient = remember { createIosSessionClient() }
         val loginController = remember {
             CasLoginController(
-                CasPasswordLoginClient(httpClient = sessionClient, userAgent = iosUserAgent()),
+                loginClient = CasPasswordLoginClient(httpClient = sessionClient, userAgent = iosUserAgent()),
+                smsClient = CasSmsLoginClient(httpClient = sessionClient, userAgent = iosUserAgent()),
             )
         }
         val cacheStore = remember { UserDefaultsKeyValueStore() }
@@ -181,6 +183,15 @@ fun App() {
                                 scope.launch { loginController.login(username, password) }
                             },
                             onSkip = { skippedLogin = true },
+                            onRequestSmsCaptcha = { username ->
+                                scope.launch { loginController.requestSmsCaptcha(username) }
+                            },
+                            onSendSmsCode = { username, captcha ->
+                                scope.launch { loginController.sendSmsCode(username, captcha) }
+                            },
+                            onSmsLogin = { username, smsCode ->
+                                scope.launch { loginController.loginWithSmsCode(username, smsCode) }
+                            },
                         )
                     }
                 }
