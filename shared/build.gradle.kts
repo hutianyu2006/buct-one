@@ -26,6 +26,8 @@ kotlin {
     }
 
     sourceSets {
+        // 宿舍房间字典（587KB，只读公共数据）随共享模块分发，双端同一份
+        commonMain.resources.srcDir("src/commonMain/resources")
         commonMain.dependencies {
             implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
             implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.13.0")

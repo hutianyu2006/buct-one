@@ -11,6 +11,7 @@ import com.buct.one.data.model.ElectricitySnapshot
 import com.buct.one.data.source.electricity.ElectricityClient
 import com.buct.one.data.source.electricity.ElectricityGatewayException
 import com.buct.one.data.source.electricity.ElectricityParser
+import com.buct.one.data.source.electricity.defaultElectricityRoomCatalogSource
 import com.buct.one.data.store.ElectricityStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -34,6 +35,9 @@ class ElectricitySyncService private constructor(
     private val client: ElectricityClient
 ) {
     private val syncMutex = Mutex()
+
+    /** 宿舍字典读取器（共享层资源，双端同一份）。 */
+    private val electricityCatalogSource = defaultElectricityRoomCatalogSource()
     private val catalogMutex = Mutex()
 
     @Volatile
@@ -93,9 +97,10 @@ class ElectricitySyncService private constructor(
         runCatching {
             catalogMutex.withLock {
                 cachedCatalog?.let { return@withLock it }
-                val raw = appContext.assets.open(CATALOG_ASSET_NAME)
-                    .bufferedReader(Charsets.UTF_8)
-                    .use { it.readText() }
+                // 字典已下沉到共享层资源（双端同一份），这里走共享读取器
+                val raw = electricityCatalogSource.readCatalogJson()
+                    ?.takeIf { it.isNotBlank() }
+                    ?: throw IllegalStateException("宿舍房间字典缺失")
                 ElectricityParser.parseRoomCatalog(raw).also { cachedCatalog = it }
             }
         }
