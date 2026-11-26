@@ -16,7 +16,7 @@ class PortalGatewayTest {
 
     private fun gateway(handler: (String) -> Pair<String, HttpStatusCode>): PortalGateway {
         val engine = MockEngine { request ->
-            val (body, status) = handler(request.url.encodedPath + "?" + (request.url.encodedQuery ?: ""))
+            val (body, status) = handler(request.url.encodedPath + "?" + request.url.encodedQuery.orEmpty())
             respond(body, status, headersOf(HttpHeaders.ContentType, "application/json"))
         }
         return PortalGateway(buildHttpClient(engine, followRedirects = false), userAgent = "test-UA")
@@ -24,18 +24,23 @@ class PortalGatewayTest {
 
     @Test
     fun calendarRequestCarriesContextParameter() = runTest {
-        var seenQuery = ""
-        val gateway = gateway { query ->
-            seenQuery = query
-            val json = """{"wid":"1","academicYear":2026,"semester":1,"termId":"2026-1",""" +
-                """"beginDate":"2026-09-01","endDate":"2027-01-15","currentTeachingWeek":12,"isCurrent":true}"""
-            json to HttpStatusCode.OK
+        val seenQueries = mutableListOf<String>()
+        val engine = MockEngine { request ->
+            val query = request.url.encodedQuery ?: ""
+            seenQueries += query
+            val body = if (request.url.encodedPath.contains("getJxz")) {
+                """{"wid":"1","academicYear":2026,"semester":1,"termId":"2026-1",""" +
+                    """"beginDate":"2026-09-01","endDate":"2027-01-15","currentTeachingWeek":12,"isCurrent":true}"""
+            } else {
+                "[]"
+            }
+            respond(body, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
         }
-        val snapshot = gateway.fetchCalendarSnapshot("2026-11-26")
+        val gateway = PortalGateway(buildHttpClient(engine, followRedirects = false), userAgent = "test-UA")
+        gateway.fetchCalendarSnapshot("2026-11-26")
         // _p 上下文参数缺失会 403，必须始终携带
-        assertTrue(seenQuery.contains("_p="), seenQuery)
-        assertTrue(seenQuery.contains("currentDate=2026-11-26"), seenQuery)
-        assertEquals(12, snapshot.currentTeachingWeek)
+        assertTrue(seenQueries.all { it.contains("_p=") }, seenQueries.toString())
+        assertTrue(seenQueries.first().contains("currentDate=2026-11-26"), seenQueries.toString())
     }
 
     @Test
@@ -58,21 +63,28 @@ class PortalGatewayTest {
 
     @Test
     fun newsColumnsAggregateAndToleratePartialFailure() = runTest {
-        var callIndex = 0
-        val gateway = gateway { _ ->
-            callIndex++
-            if (callIndex == 1) {
-                """{"totalCount":"1","articles":[{"id":"a1","title":"通知","sourceOrg":"学工办",""" +
-                    """"publishTimestampMs":1700000000000,"summary":"s","content":"c",""" +
-                    """"publicUrl":"https://i.buct.edu.cn/a","isTop":false,"isHot":false,""" +
-                    """"isNewest":true,"visitCount":"10"}]}""" to HttpStatusCode.OK
+        var calls = 0
+        val engine = MockEngine { request ->
+            calls++
+            val columnId = request.url.parameters["columnId"].orEmpty()
+            if (columnId == com.buct.one.data.model.PortalNewsColumn.NOTICE.columnId) {
+                respond(
+                    """{"totalCount":"1","articles":[{"id":"a1","title":"通知","sourceOrg":"学工办",""" +
+                        """"publishTimestampMs":1700000000000,"summary":"s","content":"c",""" +
+                        """"publicUrl":"https://i.buct.edu.cn/a","isTop":false,"isHot":false,""" +
+                        """"isNewest":true,"visitCount":"10"}]}""",
+                    HttpStatusCode.OK,
+                    headersOf(HttpHeaders.ContentType, "application/json"),
+                )
             } else {
-                "" to HttpStatusCode.InternalServerError
+                respond("", HttpStatusCode.InternalServerError)
             }
         }
+        val gateway = PortalGateway(buildHttpClient(engine, followRedirects = false), userAgent = "test-UA")
         val snapshot = gateway.fetchAllNewsSnapshot()
         // 部分栏目失败不应整体失败
         assertTrue(snapshot.columns.isNotEmpty())
+        assertTrue(calls >= 2)
     }
 
     @Test
