@@ -25,7 +25,10 @@ import com.buct.one.data.login.CasSmsLoginClient
 import com.buct.one.data.login.LoginState
 import com.buct.one.data.source.campusnet.CampusNetController
 import com.buct.one.data.source.campusnet.CampusNetGateway
+import com.buct.one.data.source.electricity.ElectricityController
+import com.buct.one.data.source.electricity.ElectricityGatewayClient
 import com.buct.one.data.store.CampusNetSnapshotStore
+import com.buct.one.data.store.ElectricitySnapshotStore
 import com.buct.one.data.store.JwNoticeSnapshotStore
 import com.buct.one.data.source.jwnotice.JwNoticeController
 import com.buct.one.data.source.jwnotice.JwNoticeGateway
@@ -36,6 +39,7 @@ import com.buct.one.shared.notice.AppNotice
 import com.buct.one.shared.notice.NoticeRepository
 import com.buct.one.shared.ui.BuctOneTheme
 import com.buct.one.shared.ui.CampusNetScreen
+import com.buct.one.shared.ui.ElectricityScreen
 import com.buct.one.shared.ui.HomeScreen
 import com.buct.one.shared.ui.JwNoticeScreen
 import com.buct.one.shared.ui.LoginScreen
@@ -49,7 +53,7 @@ internal sealed interface NoticeUiState {
     data class Failed(val message: String) : NoticeUiState
 }
 
-private enum class HomeSection { Notices, JwNotices, CampusNet }
+private enum class HomeSection { Notices, JwNotices, CampusNet, Electricity }
 
 /** iOS 端的 Compose 根节点，被 MainViewController 直接嵌入 UIViewController。 */
 @Composable
@@ -80,10 +84,21 @@ fun App() {
                 cache = CampusNetSnapshotStore(cacheStore),
             )
         }
+        val electricityController = remember {
+            ElectricityController(
+                gateway = ElectricityGatewayClient(
+                    httpClient = sessionClient,
+                    userAgent = iosUserAgent(),
+                    appVersion = AppInfo.VERSION,
+                ),
+                cache = ElectricitySnapshotStore(cacheStore),
+            )
+        }
         val scope = rememberCoroutineScope()
         val loginState by loginController.state.collectAsState()
         val jwState by jwController.state.collectAsState()
         val campusNetState by campusNetController.state.collectAsState()
+        val electricityState by electricityController.state.collectAsState()
 
         var state by remember { mutableStateOf<NoticeUiState>(NoticeUiState.Loading) }
         var reloadKey by remember { mutableStateOf(0) }
@@ -112,6 +127,10 @@ fun App() {
                 section == HomeSection.CampusNet && loggedInUsername != null -> {
                     if (campusNetController.lastSnapshot() == null) campusNetController.restoreFromCache()
                     campusNetController.refresh(loggedInUsername)
+                }
+                section == HomeSection.Electricity && loggedInUsername != null -> {
+                    if (electricityController.lastReadings() == null) electricityController.restoreFromCache()
+                    if (electricityController.targets().isEmpty()) electricityController.loadCatalog()
                 }
             }
         }
@@ -142,6 +161,11 @@ fun App() {
                             onClick = { section = HomeSection.CampusNet },
                             text = { Text("校园网") },
                         )
+                        Tab(
+                            selected = section == HomeSection.Electricity,
+                            onClick = { section = HomeSection.Electricity },
+                            text = { Text("电费") },
+                        )
                     }
                 }
 
@@ -160,6 +184,23 @@ fun App() {
                                 CampusNetScreen(
                                     state = campusNetState,
                                     onRefresh = { scope.launch { campusNetController.refresh(loggedInUsername) } },
+                                )
+                            } else if (section == HomeSection.Electricity && loggedInUsername != null) {
+                                ElectricityScreen(
+                                    state = electricityState,
+                                    lowBalanceThreshold = 20.0,
+                                    onRefresh = {
+                                        scope.launch {
+                                            electricityController.restoreFromCache()
+                                            electricityController.refresh(
+                                                targets = electricityController.targets(),
+                                                clientId = "buct-one-ios",
+                                                studentId = loggedInUsername,
+                                                signSecret = "",
+                                            )
+                                        }
+                                    },
+                                    onBack = { section = HomeSection.Notices },
                                 )
                             } else {
                                 HomeScreen(
