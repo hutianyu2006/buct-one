@@ -95,8 +95,9 @@ class ElectricityController(
                 readings += gateway.queryBalance(target, clientId, studentId, signSecret)
             } catch (banned: ElectricityGatewayException) {
                 if (banned.isBanned) {
-                    sync.commitFailure(banned.message)
-                    _state.value = ElectricityUiState.Banned(banned.message, banned.retryAfterSeconds)
+                    val message = banned.message?.takeIf { it.isNotBlank() } ?: "电费查询已被限制"
+                    sync.commitFailure(message)
+                    _state.value = ElectricityUiState.Banned(message, banned.retryAfterSeconds)
                     return
                 }
                 lastError = banned
