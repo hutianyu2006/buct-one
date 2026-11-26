@@ -139,6 +139,15 @@ class WebVpnSessionTest {
         val vault = InMemorySecureVault()
         val engine = MockEngine { request ->
             when {
+                // 激活请求（带 ticket）必须先匹配，否则会被"初始票据"分支吞掉
+                request.url.encodedPath == "/login" && request.url.parameters["ticket"] == "ST-123" ->
+                    respond(
+                        "",
+                        HttpStatusCode.OK,
+                        headersOf(
+                            HttpHeaders.SetCookie to listOf("wengine_vpn_ticketw_buct_edu_cn=active-ticket; Path=/"),
+                        ),
+                    )
                 request.url.encodedPath == "/login" && request.url.host == "w.buct.edu.cn" ->
                     respond(
                         "",
@@ -153,14 +162,6 @@ class WebVpnSessionTest {
                         HttpStatusCode.Found,
                         headersOf(
                             HttpHeaders.Location to listOf("https://w.buct.edu.cn/login?cas_login=true&ticket=ST-123"),
-                        ),
-                    )
-                request.url.encodedPath == "/login" && request.url.parameters["ticket"] == "ST-123" ->
-                    respond(
-                        "",
-                        HttpStatusCode.OK,
-                        headersOf(
-                            HttpHeaders.SetCookie to listOf("wengine_vpn_ticketw_buct_edu_cn=active-ticket; Path=/"),
                         ),
                     )
                 else -> respond("", HttpStatusCode.NotFound)

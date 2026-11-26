@@ -86,10 +86,16 @@ class WebVpnSession(
         vault?.clearAlias(SecureVault.ALIAS_WEBVPN)
     }
 
-    /** 把 URL 改写为 WebVPN 代理地址（非校内限定域则原样返回）。 */
+    /**
+     * 把 URL 改写为 WebVPN 代理地址。
+     *
+     * **只有 [WebVpnCodec.CAMPUS_ONLY_HOSTS] 里的站点才会被改写**——这是安全边界：
+     * 避免把普通校内站点（教务、邮箱等）误送进代理，[forceVpn] 也不能突破。
+     */
     fun proxyUrlIfNeeded(url: String, forceVpn: Boolean = false): String {
         val host = urlHostOf(url) ?: return url
-        val needed = forceVpn || WebVpnCodec.isCampusOnlyHost(host) && shouldPreferVpn(host)
+        if (!WebVpnCodec.isCampusOnlyHost(host)) return url
+        val needed = forceVpn || shouldPreferVpn(host)
         return if (needed) WebVpnCodec.toVpnUrl(url) else url
     }
 
