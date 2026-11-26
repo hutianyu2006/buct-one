@@ -1,6 +1,8 @@
 package com.buct.course
 
 import android.app.Application
+import com.buct.course.login.AndroidHttpClients
+import com.buct.course.login.AndroidSecureVault
 import com.buct.course.login.BuctWebVpn
 import com.buct.course.manager.AppearanceSettingsManager
 import com.buct.course.manager.AppThemeCoordinator
@@ -20,6 +22,8 @@ class CourseApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         appContext = applicationContext
+        // 会话 Cookie 加密落盘（Keystore）：重启 App 不掉登录态；密文已从备份规则排除。
+        runCatching { AndroidHttpClients.useEncryptedCookieStore(AndroidSecureVault(this)) }
         BuctWebVpn.configure(
             readSidCookies = { SidPortalSessionVault.readCookies(appContext).first },
             saveSidCookies = { SidPortalSessionVault.saveSidPortalCookies(appContext, it) },

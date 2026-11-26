@@ -6,6 +6,10 @@
     <exclude domain="file" path="vault/mail_vault.enc" />
     <exclude domain="file" path="vault/wecom_vault.enc" />
     <exclude domain="file" path="vault/ecard_vault.enc" />
+    <exclude domain="file" path="vault/secure_sso.enc" />
+    <exclude domain="file" path="vault/secure_ecard.enc" />
+    <exclude domain="file" path="vault/secure_mail.enc" />
+    <exclude domain="file" path="vault/secure_webvpn.enc" />
     <exclude domain="sharedpref" path="buct_sso_vault.xml" />
     <exclude domain="sharedpref" path="buct_mail_vault.xml" />
     <exclude domain="sharedpref" path="buct_wecom_vault.xml" />

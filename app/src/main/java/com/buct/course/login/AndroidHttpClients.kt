@@ -1,6 +1,9 @@
 package com.buct.course.login
 
 import com.buct.one.platform.buildHttpClient
+import com.buct.one.platform.security.PersistentCookieStore
+import com.buct.one.platform.security.SecureVault
+import com.buct.one.platform.session.CookieStore
 import com.buct.one.platform.session.InMemoryCookieStore
 import com.buct.one.platform.session.StoredCookie
 import io.ktor.client.HttpClient
@@ -12,8 +15,35 @@ import io.ktor.client.engine.okhttp.OkHttp
  */
 object AndroidHttpClients {
 
-    /** 会话 Cookie 存储（内存）：登录/业务网关共用的同一份 Cookie 视图。 */
-    val sessionCookieStore = InMemoryCookieStore()
+    /**
+     * 会话 Cookie 存储：默认内存实现（进程内有效）。
+     * 调用 [useEncryptedCookieStore] 后切换为 Keystore 加密落盘，实现重启不掉登录态。
+     */
+    @Volatile
+    private var activeCookieStore: CookieStore = InMemoryCookieStore()
+
+    /** 稳定的转发壳：客户端与网关持有它，切换底层存储时无需重建客户端。 */
+    private val cookieStoreDelegate = object : CookieStore {
+        override fun load(): List<StoredCookie> = activeCookieStore.load()
+        override fun save(cookies: List<StoredCookie>) = activeCookieStore.save(cookies)
+        override fun clear() = activeCookieStore.clear()
+    }
+
+    /** 当前生效的 Cookie 存储（登录/业务网关共用的同一份视图）。 */
+    val sessionCookieStore: CookieStore get() = cookieStoreDelegate
+
+    /**
+     * 启用加密持久化 Cookie（必须在创建 [session] 客户端之前调用，通常在 Application 启动时）。
+     * 密文进 `files/vault/secure_sso.enc`，已从备份规则排除；退出登录需调用 [clearSessionCookies]。
+     */
+    fun useEncryptedCookieStore(vault: SecureVault) {
+        activeCookieStore = PersistentCookieStore(vault, SecureVault.ALIAS_SSO)
+    }
+
+    /** 退出登录：立即擦除落盘的会话 Cookie 密文。 */
+    fun clearSessionCookies() {
+        activeCookieStore.clear()
+    }
 
     /** 登录/会话客户端：关闭自动重定向以便观察 CAS 的 302 与 Set-Cookie，Cookie 走内存存储。 */
     val session: HttpClient by lazy {
