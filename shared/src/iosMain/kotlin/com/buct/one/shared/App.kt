@@ -27,6 +27,8 @@ import com.buct.one.data.source.campusnet.CampusNetController
 import com.buct.one.data.source.campusnet.CampusNetGateway
 import com.buct.one.data.source.electricity.ElectricityController
 import com.buct.one.data.source.electricity.ElectricityGatewayClient
+import com.buct.one.data.source.tygl.TyglController
+import com.buct.one.data.source.tygl.TyglGateway
 import com.buct.one.data.store.CampusNetSnapshotStore
 import com.buct.one.data.store.ElectricitySnapshotStore
 import com.buct.one.data.store.JwNoticeSnapshotStore
@@ -40,6 +42,7 @@ import com.buct.one.shared.notice.NoticeRepository
 import com.buct.one.shared.ui.BuctOneTheme
 import com.buct.one.shared.ui.CampusNetScreen
 import com.buct.one.shared.ui.ElectricityScreen
+import com.buct.one.shared.ui.TyglScreen
 import com.buct.one.shared.ui.HomeScreen
 import com.buct.one.shared.ui.JwNoticeScreen
 import com.buct.one.shared.ui.LoginScreen
@@ -53,7 +56,7 @@ internal sealed interface NoticeUiState {
     data class Failed(val message: String) : NoticeUiState
 }
 
-private enum class HomeSection { Notices, JwNotices, CampusNet, Electricity }
+private enum class HomeSection { Notices, JwNotices, CampusNet, Electricity, Tygl }
 
 /** iOS 端的 Compose 根节点，被 MainViewController 直接嵌入 UIViewController。 */
 @Composable
@@ -84,6 +87,9 @@ fun App() {
                 cache = CampusNetSnapshotStore(cacheStore),
             )
         }
+        val tyglController = remember {
+            TyglController(TyglGateway(httpClient = sessionClient, userAgent = iosUserAgent()))
+        }
         val electricityController = remember {
             ElectricityController(
                 gateway = ElectricityGatewayClient(
@@ -99,6 +105,7 @@ fun App() {
         val jwState by jwController.state.collectAsState()
         val campusNetState by campusNetController.state.collectAsState()
         val electricityState by electricityController.state.collectAsState()
+        val tyglState by tyglController.state.collectAsState()
 
         var state by remember { mutableStateOf<NoticeUiState>(NoticeUiState.Loading) }
         var reloadKey by remember { mutableStateOf(0) }
@@ -132,6 +139,7 @@ fun App() {
                     if (electricityController.lastReadings() == null) electricityController.restoreFromCache()
                     if (electricityController.targets().isEmpty()) electricityController.loadCatalog()
                 }
+                section == HomeSection.Tygl && loggedInUsername != null -> tyglController.refresh()
             }
         }
 
@@ -165,6 +173,11 @@ fun App() {
                             selected = section == HomeSection.Electricity,
                             onClick = { section = HomeSection.Electricity },
                             text = { Text("电费") },
+                        )
+                        Tab(
+                            selected = section == HomeSection.Tygl,
+                            onClick = { section = HomeSection.Tygl },
+                            text = { Text("体测") },
                         )
                     }
                 }
@@ -200,6 +213,12 @@ fun App() {
                                             )
                                         }
                                     },
+                                    onBack = { section = HomeSection.Notices },
+                                )
+                            } else if (section == HomeSection.Tygl && loggedInUsername != null) {
+                                TyglScreen(
+                                    state = tyglState,
+                                    onRefresh = { scope.launch { tyglController.refresh() } },
                                     onBack = { section = HomeSection.Notices },
                                 )
                             } else {
