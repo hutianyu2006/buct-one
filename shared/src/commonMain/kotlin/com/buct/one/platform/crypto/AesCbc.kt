@@ -29,6 +29,55 @@ internal object AesCbc {
         return output
     }
 
+    /**
+     * AES-128-CFB（无填充），WebVPN 的 URL 加解密用。
+     * CFB-128：每轮用 `encryptBlock(feedback)` 得到密钥流，与明文异或后
+     * **密文块**作为下一轮 feedback（不需要解密块）。
+     */
+    fun encryptCfbNoPadding(plainBytes: ByteArray, key: ByteArray, iv: ByteArray): ByteArray {
+        require(iv.size == BLOCK_SIZE) { "AES-CFB 的 IV 必须是 16 字节" }
+        val roundKeys = expandKey(key)
+        val rounds = roundKeys.size / 4 - 1
+        val output = ByteArray(plainBytes.size)
+        var feedback = iv.copyOf()
+        var offset = 0
+        while (offset < plainBytes.size) {
+            val keyStream = encryptBlock(feedback, roundKeys, rounds)
+            val take = minOf(BLOCK_SIZE, plainBytes.size - offset)
+            for (i in 0 until take) {
+                output[offset + i] = (plainBytes[offset + i].toInt() xor keyStream[i].toInt()).toByte()
+            }
+            // 密文块作为下一轮 feedback；不足一块时用本轮密文补齐（与 OpenSSL 行为一致）
+            feedback = ByteArray(BLOCK_SIZE) { index ->
+                if (index < take) output[offset + index] else keyStream[index]
+            }
+            offset += take
+        }
+        return output
+    }
+
+    /** AES-128-CFB（无填充）解密：与加密同构，用密文块作 feedback。 */
+    fun decryptCfbNoPadding(cipherBytes: ByteArray, key: ByteArray, iv: ByteArray): ByteArray {
+        require(iv.size == BLOCK_SIZE) { "AES-CFB 的 IV 必须是 16 字节" }
+        val roundKeys = expandKey(key)
+        val rounds = roundKeys.size / 4 - 1
+        val output = ByteArray(cipherBytes.size)
+        var feedback = iv.copyOf()
+        var offset = 0
+        while (offset < cipherBytes.size) {
+            val keyStream = encryptBlock(feedback, roundKeys, rounds)
+            val take = minOf(BLOCK_SIZE, cipherBytes.size - offset)
+            for (i in 0 until take) {
+                output[offset + i] = (cipherBytes[offset + i].toInt() xor keyStream[i].toInt()).toByte()
+            }
+            feedback = ByteArray(BLOCK_SIZE) { index ->
+                if (index < take) cipherBytes[offset + index] else keyStream[index]
+            }
+            offset += take
+        }
+        return output
+    }
+
     /** AES-ECB + PKCS7（校方统一认证 CryptoJS 的等价实现）。 */
     fun encryptEcbPkcs7(plainBytes: ByteArray, key: ByteArray): ByteArray {
         val roundKeys = expandKey(key)
