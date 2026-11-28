@@ -188,7 +188,7 @@ class ScsGateway(
             if (status !in 300..399) {
                 Result.failure(ScsAuthExpiredException("统一身份认证登录失败，请检查学号或密码"))
             } else {
-                val next = resolveUrl(entryUrl, response.headers[HttpHeaders.Location])
+                val next = resolveUrl(entryUrl, response.headers[HttpHeaders.Location].orEmpty())
                 if (followCasAndLogin(next)) Result.success(Unit) else {
                     Result.failure(ScsAuthExpiredException("统一认证换取第二课堂登录凭证失败"))
                 }
