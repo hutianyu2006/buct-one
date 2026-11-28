@@ -47,8 +47,8 @@ data class CasLoginPage(
         }
 
         private fun extractInputValue(html: String, name: String): String? {
-            val namePattern = Regex("""names*=s*["']""" + Regex.escape(name) + """["']""", RegexOption.IGNORE_CASE)
-            val valuePattern = Regex("""values*=s*["']([^"']*)["']""", RegexOption.IGNORE_CASE)
+            val namePattern = Regex("""name\s*=\s*["']""" + Regex.escape(name) + """["']""", RegexOption.IGNORE_CASE)
+            val valuePattern = Regex("""value\s*=\s*["']([^"']*)["']""", RegexOption.IGNORE_CASE)
             for (tag in INPUT_TAG_PATTERN.findAll(html)) {
                 if (namePattern.containsMatchIn(tag.value)) {
                     return valuePattern.find(tag.value)?.groupValues?.getOrNull(1)?.let(::htmlUnescape)?.trim()

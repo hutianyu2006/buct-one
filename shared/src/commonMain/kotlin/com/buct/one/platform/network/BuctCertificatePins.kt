@@ -9,7 +9,7 @@ package com.buct.one.platform.network
  *
  * 部分系统（尤其 Android 老版本与某些 iOS 版本）信任库缺少 R3 / E46，会导致握手失败，
  * 因此内置这两条链作为**兜底**：先走系统默认校验，失败才比对内置链，**绝不**无条件信任
- * （Android 见 `BuctTlsTrustManager`，iOS 见 `IosServerTrustEvaluator`）。
+ * （Android 见 `BuctTlsTrustManager`，iOS 见 `IosTlsBridge` + Swift 侧 `SecTrust` 兜底）。
  */
 object BuctCertificatePins {
 
@@ -78,8 +78,19 @@ object BuctCertificatePins {
         "X2ba6xEkDe+YO7vC0twjbkv9PKpqGGuZ61JZryjFsp+DFpEclCVy4noCMQCwvZDXD/m2Ko1HA5Bkmz7YQOFAiNDD49IWa2wdT7R3" +
         "DtODaSXH/BiXv8fwB9su4tU="
 
-    /** 内置链的信任点（iOS 用作 anchor，Android 并入 acceptedIssuers）。 */
+    /** 内置链的信任点（根证书）。 */
     val trustPointBase64: List<String> = listOf(GLOBALSIGN_ROOT_B64, SECTIGO_E46_ROOT_B64)
+
+    /**
+     * 内置双链的全部证书（根证书 + 中间证书）。
+     * iOS `SecTrust` 兜底需同时传入中间证书，避免服务端只下发叶证书（缺中间链）时仍校验失败。
+     */
+    val allChainCertificatesBase64: List<String> = listOf(
+        GLOBALSIGN_ROOT_B64,
+        SECTIGO_E46_ROOT_B64,
+        GLOBALSIGN_INTERMEDIATE_B64,
+        ZEROSSL_INTERMEDIATE_B64,
+    )
 
     /** 允许走内置链兜底的域名后缀（仅校内）。 */
     val BUCT_HOST_SUFFIXES: List<String> = listOf("buct.edu.cn")

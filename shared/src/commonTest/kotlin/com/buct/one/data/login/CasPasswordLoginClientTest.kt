@@ -133,4 +133,17 @@ class CasPasswordLoginClientTest {
         val outcome = CasPasswordLoginClient(client, userAgent = "test-UA").login("20230001", "p@ss")
         assertEquals(CasLoginOutcome.Failed("统一认证密钥缺失，请重新登录"), outcome)
     }
+
+    @Test
+    fun parseInputExecutionFallback() {
+        val html = """
+            <html><body>
+              <input type="hidden" name="execution" value="exec-from-input" />
+              <p id="login-croypto">$aesKey</p>
+            </body></html>
+        """.trimIndent()
+        val parsed = CasLoginPage.parse(html)
+        assertEquals("exec-from-input", parsed.execution)
+        assertEquals(aesKey, parsed.aesKey)
+    }
 }

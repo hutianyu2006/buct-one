@@ -36,7 +36,15 @@ class BuctCertificatePinsTest {
     }
 
     @Test
+    fun allChainCertificatesIncludeRootsAndIntermediates() {
+        assertEquals(4, BuctCertificatePins.allChainCertificatesBase64.size)
+        assertTrue(BuctCertificatePins.allChainCertificatesBase64.contains(BuctCertificatePins.GLOBALSIGN_INTERMEDIATE_B64))
+        assertTrue(BuctCertificatePins.allChainCertificatesBase64.contains(BuctCertificatePins.ZEROSSL_INTERMEDIATE_B64))
+    }
+
+    @Test
     fun onlyBuctHostsMayUseFallback() {
+        assertTrue(BuctCertificatePins.isBuctHost("sidportal.buct.edu.cn"))
         assertTrue(BuctCertificatePins.isBuctHost("portal.buct.edu.cn"))
         assertTrue(BuctCertificatePins.isBuctHost("BUCT.EDU.CN"))
         assertTrue(BuctCertificatePins.isBuctHost("scs.buct.edu.cn"))

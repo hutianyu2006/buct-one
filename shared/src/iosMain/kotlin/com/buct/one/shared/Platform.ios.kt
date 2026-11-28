@@ -1,7 +1,7 @@
 package com.buct.one.shared
 
+import com.buct.one.platform.createPlatformHttpEngine
 import io.ktor.client.HttpClient
-import io.ktor.client.engine.darwin.Darwin
 import io.ktor.client.plugins.HttpTimeout
 import platform.Foundation.NSDate
 import platform.Foundation.NSURL
@@ -10,8 +10,8 @@ import platform.UIKit.UIApplication
 
 internal actual fun nowMillis(): Long = (NSDate().timeIntervalSince1970 * 1000.0).toLong()
 
-/** iOS 网络客户端：Darwin（NSURLSession）+ 统一超时。 */
-internal fun createDarwinHttpClient(): HttpClient = HttpClient(Darwin) {
+/** iOS 网络客户端：复用平台 Darwin 引擎 + 统一超时。 */
+internal fun createDarwinHttpClient(): HttpClient = HttpClient(createPlatformHttpEngine()) {
     install(HttpTimeout) {
         requestTimeoutMillis = 15_000
         connectTimeoutMillis = 10_000
