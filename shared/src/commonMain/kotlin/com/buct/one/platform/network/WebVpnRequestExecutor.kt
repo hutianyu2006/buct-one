@@ -39,11 +39,13 @@ class WebVpnRequestExecutor(
      * 执行一次请求；受阻时自动改走 WebVPN 重试一次。
      *
      * @param forceVpn 强制走代理（仅对校内限定域生效；其它域名仍直连）。
+     * @param headers 额外请求头（业务网关的 Accept / Referer 等，代理重试时同样携带）。
      * @param block 响应处理（只调用一次：要么直连成功，要么代理重试成功）。
      */
     suspend fun <T> execute(
         url: String,
         forceVpn: Boolean = false,
+        headers: Map<String, String> = emptyMap(),
         block: suspend (WebVpnResponse) -> T,
     ): T {
         val host = urlHostOf(url)?.lowercase().orEmpty()
@@ -52,10 +54,10 @@ class WebVpnRequestExecutor(
 
         if (preferVpn) {
             val proxyUrl = session.proxyUrlIfNeeded(url, forceVpn = true)
-            val proxied = perform(proxyUrl)
+            val proxied = perform(proxyUrl, headers)
             if (proxied.isSuccess) return block(proxied)
             // 代理也失败：直连再试一次（例如用户其实在校内网）
-            val direct = perform(url)
+            val direct = perform(url, headers)
             if (direct.isSuccess) {
                 session.markDirectSucceeded(host)
                 return block(direct)
@@ -63,7 +65,7 @@ class WebVpnRequestExecutor(
             return block(direct)
         }
 
-        val direct = perform(url)
+        val direct = perform(url, headers)
         if (!campusOnly) return block(direct)
 
         val verdict = session.classifyResponse(
@@ -81,13 +83,14 @@ class WebVpnRequestExecutor(
         // 直连受阻：记住 5 分钟，并尝试换取票据后改走代理
         session.markDirectFailed(host)
         session.ensureTicket()
-        val retried = perform(session.proxyUrlIfNeeded(url, forceVpn = true))
+        val retried = perform(session.proxyUrlIfNeeded(url, forceVpn = true), headers)
         return block(retried)
     }
 
-    private suspend fun perform(target: String): WebVpnResponse {
+    private suspend fun perform(target: String, headers: Map<String, String> = emptyMap()): WebVpnResponse {
         val response = client.get(target) {
             if (userAgent != null) header(HttpHeaders.UserAgent, userAgent)
+            for ((name, value) in headers) header(name, value)
         }
         // 网关会定期轮换票据 Cookie：见到就写回 Vault，避免过期后整页失效
         session.updateTicketFromCookie(response.headers.getAll(HttpHeaders.SetCookie).orEmpty())

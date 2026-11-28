@@ -7,6 +7,8 @@ import com.buct.one.data.model.PortalNewsColumnPage
 import com.buct.one.data.model.PortalNewsSnapshot
 import com.buct.one.data.text.resolveUrl
 import com.buct.one.data.text.urlHostOf
+import com.buct.one.platform.network.WebVpnCodec
+import com.buct.one.platform.network.WebVpnRequestExecutor
 import io.ktor.client.HttpClient
 import io.ktor.client.request.get
 import io.ktor.client.request.header
@@ -16,19 +18,29 @@ import io.ktor.http.HttpHeaders
 /** 信息门户会话失效（跳到统一认证或返回登录页）。 */
 class PortalAuthExpiredException(message: String) : Exception(message)
 
+/** 一次门户请求的结果快照（body 已读成文本，便于分类与二次解析）。 */
+private data class PortalHttpResult(
+    val status: Int,
+    val location: String?,
+    val body: String,
+)
+
 /**
  * i北化信息门户（i.buct.edu.cn）与校内资讯（mnews.buct.edu.cn）网关，双端共用。
  *
  * 关键协议点（与 Android 实现一致，改动前先看 `PortalClient`）：
  * - 所有门户接口都必须带 `_p` 上下文参数，缺省返回 **HTTP 403**；
  * - 校历接口 `calendar/mgr/api/ids/list.rst` 的 `fromDate`/`endDate` 必须是 ISO-8601 UTC；
- * - 会话由注入的 [HttpClient] 持有；校外访问依赖调用方已配置的 WebVPN 改写。
+ * - 重定向必须自己跟随（调用方关闭自动重定向），以便识别「跳统一认证 = 会话失效」；
+ * - 校外访问：注入 [vpn] 后每个请求都走「直连优先 → 403/受限页自动改走 WebVPN」，
+ *   未注入时保持直连（Android 侧由 OkHttp 拦截器负责代理，注入后不要重复降级）。
  *
  * 解析全部复用 [PortalParser]。
  */
 class PortalGateway(
     private val httpClient: HttpClient,
     private val userAgent: String,
+    private val vpn: WebVpnRequestExecutor? = null,
 ) {
 
     /** 校历 + 教学周 + 节假日（供课表校准开学日期）。 */
@@ -91,17 +103,19 @@ class PortalGateway(
         var current = upgradeToHttps(fullUrl)
         repeat(MAX_REDIRECT_HOPS) {
             if (!isPortalHost(current)) throw PortalAuthExpiredException("信息门户跳转到了非预期域名")
-            val response = httpClient.get(current) {
-                header(HttpHeaders.UserAgent, userAgent)
-                header(HttpHeaders.Accept, "application/json, text/javascript, */*; q=0.01")
-                header(HttpHeaders.Referrer, REFERER_MAIN)
-                header("X-Requested-With", "XMLHttpRequest")
-            }
-            val status = response.status.value
+            val result = fetchOnce(
+                url = current,
+                headers = mapOf(
+                    HttpHeaders.Accept to "application/json, text/javascript, */*; q=0.01",
+                    HttpHeaders.Referrer to REFERER_MAIN,
+                    "X-Requested-With" to "XMLHttpRequest",
+                ),
+            )
+            val status = result.status
             if (status in 300..399) {
-                val location = response.headers[HttpHeaders.Location]
+                val location = result.location
                     ?: throw PortalAuthExpiredException("信息门户重定向缺少地址")
-                val next = upgradeToHttps(resolveUrl(current, location))
+                val next = upgradeToHttps(unwrapVpn(resolveUrl(current, location)))
                 val host = urlHostOf(next)?.lowercase().orEmpty()
                 if (host == PORTAL_HOST && !next.contains("/login", ignoreCase = true)) {
                     current = next
@@ -113,7 +127,7 @@ class PortalGateway(
                 throw PortalAuthExpiredException("信息门户认证失效或拒绝访问（HTTP $status）")
             }
             if (status !in 200..299) throw IllegalStateException("信息门户请求失败（HTTP $status）")
-            val body = response.bodyAsText()
+            val body = result.body
             val trimmed = body.trimStart()
             if (trimmed.startsWith("<") &&
                 (body.contains("login-page-flowkey") || body.contains("统一身份认证"))
@@ -128,23 +142,25 @@ class PortalGateway(
     private suspend fun fetchMnews(fullUrl: String): String {
         var current = upgradeToHttps(fullUrl)
         repeat(MAX_MNEWS_HOPS) {
-            val response = httpClient.get(current) {
-                header(HttpHeaders.UserAgent, userAgent)
-                header(HttpHeaders.Accept, "application/json, text/javascript, */*; q=0.01")
-                header(HttpHeaders.Referrer, REFERER_MAIN)
-            }
-            val status = response.status.value
+            val result = fetchOnce(
+                url = current,
+                headers = mapOf(
+                    HttpHeaders.Accept to "application/json, text/javascript, */*; q=0.01",
+                    HttpHeaders.Referrer to REFERER_MAIN,
+                ),
+            )
+            val status = result.status
             if (status in 300..399) {
-                val location = response.headers[HttpHeaders.Location]
+                val location = result.location
                     ?: throw PortalAuthExpiredException("校内资讯重定向缺少地址")
-                val next = upgradeToHttps(resolveUrl(current, location))
+                val next = upgradeToHttps(unwrapVpn(resolveUrl(current, location)))
                 if (!isMnewsOrPortalHost(next)) throw PortalAuthExpiredException("校内资讯跳转到了非预期域名")
                 current = next
                 return@repeat
             }
             if (status == 401 || status == 403) throw PortalAuthExpiredException("校内资讯认证失效")
             if (status !in 200..299) throw IllegalStateException("校内资讯请求失败（HTTP $status）")
-            val body = response.bodyAsText()
+            val body = result.body
             val host = urlHostOf(current)?.lowercase().orEmpty()
             val trimmed = body.trimStart()
             if (host == PORTAL_HOST_LEGACY ||
@@ -157,6 +173,31 @@ class PortalGateway(
         }
         throw IllegalStateException("校内资讯重定向次数过多")
     }
+
+    /**
+     * 单次 GET：注入 [vpn] 时交给「直连优先 → 受阻转代理」执行器，否则直连。
+     * 两条路径都**不自动跟随重定向**，由上层统一处理 3xx（识别会话失效）。
+     */
+    private suspend fun fetchOnce(url: String, headers: Map<String, String>): PortalHttpResult {
+        val executor = vpn
+        if (executor != null) {
+            return executor.execute(url = url, headers = headers) { response ->
+                PortalHttpResult(status = response.status, location = response.location, body = response.body)
+            }
+        }
+        val response = httpClient.get(url) {
+            header(HttpHeaders.UserAgent, userAgent)
+            for ((name, value) in headers) header(name, value)
+        }
+        return PortalHttpResult(
+            status = response.status.value,
+            location = response.headers[HttpHeaders.Location],
+            body = response.bodyAsText(),
+        )
+    }
+
+    /** WebVPN 代理地址还原成原始地址：重定向判断与域名白名单都按「逻辑地址」来做。 */
+    private fun unwrapVpn(url: String): String = WebVpnCodec.fromVpnUrl(url) ?: url
 
     private fun isPortalHost(url: String): Boolean =
         urlHostOf(url)?.equals(PORTAL_HOST, ignoreCase = true) == true
@@ -188,6 +229,10 @@ class PortalGateway(
         const val PORTAL_BASE = "https://i.buct.edu.cn"
         const val MNEWS_BASE = "https://mnews.buct.edu.cn"
         const val MNEWS_SITE_ID = "100000251"
+
+        /** 快照来源标识（写入 Provenance.source，便于排查数据来自哪个站点）。 */
+        const val PORTAL_SOURCE_ID = "i.buct.edu.cn"
+        const val MNEWS_SOURCE_ID = "mnews.buct.edu.cn"
 
         private const val PORTAL_HOST = "i.buct.edu.cn"
         private const val PORTAL_HOST_LEGACY = "sidportal.buct.edu.cn"
