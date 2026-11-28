@@ -3,6 +3,7 @@ package com.buct.one.data.sync
 import com.buct.one.platform.AppLogger
 import com.buct.one.platform.PrintLogger
 import com.buct.one.shared.nowMillis
+import kotlin.concurrent.Volatile
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock

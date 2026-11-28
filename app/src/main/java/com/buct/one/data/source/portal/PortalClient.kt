@@ -4,15 +4,16 @@ import com.buct.course.login.BuctAesCrypto
 import com.buct.course.login.BuctDns
 import com.buct.course.login.BuctTlsTrustManager
 import com.buct.course.login.BuctWebVpn
-import com.buct.course.login.BuctWebVpnAuthRequiredException
 import com.buct.course.login.BuctWebVpnInterceptor
 import com.buct.course.login.BuctWebVpnNetworkInterceptor
+import com.buct.course.login.AndroidHttpClients
 import com.buct.course.login.MatchingMemoryCookieJar
 import com.buct.one.data.model.PortalCalendarSnapshot
 import com.buct.one.data.model.PortalLibrarySnapshot
-import com.buct.one.data.model.PortalNewsColumn
 import com.buct.one.data.model.PortalNewsColumnPage
 import com.buct.one.data.model.PortalNewsSnapshot
+import com.buct.one.data.source.portal.PortalAuthExpiredException
+import com.buct.one.data.source.portal.PortalGateway
 import okhttp3.Cookie
 import okhttp3.FormBody
 import okhttp3.HttpUrl
@@ -332,214 +333,64 @@ class PortalClient {
         return url
     }
 
-    private fun fetchAuthenticatedGet(fullUrl: String, allowReauth: Boolean = true): String {
-        if (!authenticated && !authenticateWithSso()) {
-            throw IOException("信息门户统一认证会话已失效，请重新登录")
-        }
-
-        var currentUrl = upgradePortalHttpToHttps(fullUrl.toHttpUrl())
-        var hops = 0
-        while (hops < 4) {
-            hops++
-            val safeUrl = upgradePortalHttpToHttps(currentUrl)
-            val req = Request.Builder()
-                .url(safeUrl)
-                .header("User-Agent", UA)
-                .header("Accept", "application/json, text/javascript, */*; q=0.01")
-                .header("Referer", REFERER_MAIN)
-                .header("X-Requested-With", "XMLHttpRequest")
-                .get()
-                .build()
-
-            var redirectNext: HttpUrl? = null
-            var statusCode = 0
-            var body = ""
-            httpClient.newCall(req).execute().use { resp ->
-                statusCode = resp.code
-                if (statusCode in 300..399) {
-                    val loc = resp.header("Location").orEmpty()
-                    if (loc.isNotBlank()) {
-                        redirectNext = safeUrl.resolve(loc)
-                    }
-                } else {
-                    body = resp.body?.string().orEmpty()
-                }
-            }
-
-            if (redirectNext != null) {
-                val next = redirectNext!!
-                val host = next.host.lowercase()
-                if (host == "i.buct.edu.cn" && !next.encodedPath.contains("login", ignoreCase = true)) {
-                    currentUrl = upgradePortalHttpToHttps(next)
-                    continue
-                }
-                authenticated = false
-                if (allowReauth && authenticateWithSso()) {
-                    return fetchAuthenticatedGet(fullUrl, allowReauth = false)
-                }
-                throw IOException("信息门户统一认证会话已失效，请重新登录")
-            }
-
-            if (statusCode == 401 || statusCode == 403) {
-                authenticated = false
-                if (allowReauth && authenticateWithSso()) {
-                    return fetchAuthenticatedGet(fullUrl, allowReauth = false)
-                }
-                throw IOException("信息门户认证失效或拒绝访问（HTTP $statusCode）")
-            }
-
-            if (statusCode !in 200..299) {
-                throw IOException("信息门户请求失败（HTTP $statusCode）")
-            }
-
-            val trimmed = body.trimStart()
-            if (trimmed.startsWith("<") && (body.contains("login-page-flowkey") || body.contains("统一身份认证"))) {
-                authenticated = false
-                if (allowReauth && authenticateWithSso()) {
-                    return fetchAuthenticatedGet(fullUrl, allowReauth = false)
-                }
-                throw IOException("信息门户统一认证会话已失效，请重新登录")
-            }
-
-            return body
-        }
-
-        throw IOException("信息门户接口重定向次数过多")
+    /**
+     * 共享层网关：请求与解析全部复用 `shared/commonMain` 的 [PortalGateway]（与 iOS 同一份实现）。
+     *
+     * OkHttp 的 `cookieJar` 是登录/换票的事实来源，这里在每次调用前把门户与资讯域下的 Cookie
+     * 种进共享 CookieStore，保证两个 HTTP 栈共享同一登录态；共享网关抛出的
+     * [PortalAuthExpiredException] 统一映射回 Android 侧既有的 `IOException` 语义。
+     */
+    private fun sharedGateway(): PortalGateway {
+        AndroidHttpClients.seedCookies("i.buct.edu.cn", cookieHeaderFor("$PORTAL_BASE/"))
+        AndroidHttpClients.seedCookies("mnews.buct.edu.cn", cookieHeaderFor("$MNEWS_BASE/"))
+        AndroidHttpClients.seedCookies("sidportal.buct.edu.cn", exportSidPortalCookieHeader())
+        return PortalGateway(AndroidHttpClients.session, userAgent = UA)
     }
+
+    private fun cookieHeaderFor(url: String): String = cookieJar.cookieHeaderFor(url.toHttpUrl())
 
     /**
      * 拉取 i北化官方学期校历、当前教学周与法定节假日。
      */
-    fun fetchCalendarSnapshot(todayDate: String): PortalCalendarSnapshot {
-        val jxzUrl =
-            "$PORTAL_BASE/_web/fusionportal/getJxz.jsp?currentDate=$todayDate&_p=$DEFAULT_PORTAL_CTX"
-        val jxzRaw = fetchAuthenticatedGet(jxzUrl)
-        val base = PortalParser.parseJxzResponse(jxzRaw)
-
-        val holidays = if (base.beginDate.length == 10 && base.endDate.length == 10) {
-            runCatching {
-                val idsUrl =
-                    "$PORTAL_BASE/calendar/mgr/api/ids/list.rst" +
-                        "?queryType=2&categoryIds=-2" +
-                        "&fromDate=${base.beginDate}T00:00:00.000Z" +
-                        "&endDate=${base.endDate}T00:00:00.000Z" +
-                        "&type=0&_p=$DEFAULT_PORTAL_CTX"
-                val rawDays = fetchAuthenticatedGet(idsUrl)
-                PortalParser.parseCalendarDays(rawDays)
-            }.getOrDefault(emptyList())
-        } else {
-            emptyList()
-        }
-
-        return base.copy(holidays = holidays)
+    suspend fun fetchCalendarSnapshot(todayDate: String): PortalCalendarSnapshot = try {
+        sharedGateway().fetchCalendarSnapshot(todayDate)
+    } catch (expired: PortalAuthExpiredException) {
+        authenticated = false
+        throw IOException(expired.message ?: "信息门户统一认证会话已失效，请重新登录")
     }
 
     /**
      * 拉取 i北化首页「借阅图书」总本数与在借明细（getYktOrBook.jsp?type=book）。
      */
-    fun fetchBorrowedBooks(page: Int = 1, rows: Int = 50): PortalLibrarySnapshot {
-        val url =
-            "$PORTAL_BASE/_web/fusionportal/getYktOrBook.jsp" +
-                "?page=$page&rows=$rows&type=book&_p=$DEFAULT_PORTAL_CTX"
-        val raw = fetchAuthenticatedGet(url)
-        return PortalParser.parseBorrowedBooks(raw)
-    }
-
-    private fun fetchMnewsGet(fullUrl: String): String {
-        var currentUrl: HttpUrl = upgradePortalHttpToHttps(fullUrl.toHttpUrl())
-        var hops = 0
-        while (hops < 14) {
-            hops++
-            val safeUrl = upgradePortalHttpToHttps(currentUrl)
-            val req = Request.Builder()
-                .url(safeUrl)
-                .header("User-Agent", BuctWebVpn.userAgentFor(safeUrl, UA))
-                .header("Accept", "application/json, text/javascript, */*; q=0.01")
-                .header("Referer", REFERER_MAIN)
-                .get()
-                .build()
-
-            var redirectNext: HttpUrl? = null
-            var statusCode = 0
-            var body = ""
-            httpClient.newCall(req).execute().use { resp ->
-                statusCode = resp.code
-                if (statusCode in 300..399) {
-                    val loc = resp.header("Location").orEmpty()
-                    if (loc.isNotBlank()) {
-                        redirectNext = safeUrl.resolve(loc)
-                    }
-                } else {
-                    body = resp.body?.string().orEmpty()
-                }
-            }
-
-            if (redirectNext != null) {
-                val next = redirectNext!!
-                if (!isAllowedAuthHost(next.host.lowercase())) {
-                    throw MnewsAuthExpiredException()
-                }
-                currentUrl = upgradePortalHttpToHttps(next)
-                continue
-            }
-
-            if (statusCode == 401 || statusCode == 403) {
-                throw MnewsAuthExpiredException()
-            }
-            if (statusCode !in 200..299) {
-                throw IOException("校内资讯请求失败（HTTP $statusCode）")
-            }
-
-            val host = safeUrl.host.lowercase()
-            val trimmed = body.trimStart()
-            if (host == "sidportal.buct.edu.cn" ||
-                (trimmed.startsWith("<") && (body.contains("login-page-flowkey") || body.contains("统一身份认证")))
-            ) {
-                throw MnewsAuthExpiredException()
-            }
-            return body
-        }
-
-        throw IOException("校内资讯重定向次数过多")
+    suspend fun fetchBorrowedBooks(page: Int = 1, rows: Int = 50): PortalLibrarySnapshot = try {
+        sharedGateway().fetchBorrowedBooks(page = page, rows = rows)
+    } catch (expired: PortalAuthExpiredException) {
+        authenticated = false
+        throw IOException(expired.message ?: "信息门户统一认证会话已失效，请重新登录")
     }
 
     /**
-     * 拉取 mnews.buct.edu.cn 单个栏目的校内资讯列表。
+     * 拉取 mnews.buct.edu.cn 单个栏目的校内资讯列表（共享 [PortalGateway]）。
      */
-    fun fetchNewsColumn(
+    suspend fun fetchNewsColumn(
         columnId: String,
         beginIndex: Int = 0,
         pageSize: Int = 15
-    ): PortalNewsColumnPage {
-        val url =
-            "$MNEWS_BASE/mobile/getPortalArticleList16ByUser.rst" +
-                "?siteId=$MNEWS_SITE_ID&columnId=$columnId&pageSize=$pageSize&beginIndex=$beginIndex&scope=0"
-        val raw = fetchMnewsGet(url)
-        return PortalParser.parseNewsArticlesPage(columnId, raw)
+    ): PortalNewsColumnPage = try {
+        sharedGateway().fetchNewsColumn(columnId = columnId, beginIndex = beginIndex, pageSize = pageSize)
+    } catch (expired: PortalAuthExpiredException) {
+        authenticated = false
+        throw IOException(expired.message ?: "校内资讯统一认证会话已过期，请重新登录")
     }
 
     /**
      * 依次拉取全部 4 个校内综合资讯栏位（通知公告 / 活动公告 / 招聘信息 / 北化新闻）。
+     * 单栏目失败不影响其他栏目、全部失败才抛错——该语义已固化在共享网关里。
      */
-    fun fetchAllNewsSnapshot(pageSize: Int = 15): PortalNewsSnapshot {
-        val columns = LinkedHashMap<String, PortalNewsColumnPage>()
-        var firstError: Throwable? = null
-        for (col in PortalNewsColumn.entries) {
-            val res = runCatching {
-                fetchNewsColumn(columnId = col.columnId, beginIndex = 0, pageSize = pageSize)
-            }
-            val err = res.exceptionOrNull()
-            if (err is MnewsAuthExpiredException || err is BuctWebVpnAuthRequiredException) throw err
-            if (err != null && firstError == null) firstError = err
-            res.getOrNull()?.let { page ->
-                columns[col.columnId] = page
-            }
-        }
-        if (columns.isEmpty() && firstError != null) {
-            throw firstError
-        }
-        return PortalNewsSnapshot(columns = columns)
+    suspend fun fetchAllNewsSnapshot(pageSize: Int = 15): PortalNewsSnapshot = try {
+        sharedGateway().fetchAllNewsSnapshot(pageSize = pageSize)
+    } catch (expired: PortalAuthExpiredException) {
+        authenticated = false
+        throw IOException(expired.message ?: "校内资讯统一认证会话已过期，请重新登录")
     }
-
-    private class MnewsAuthExpiredException : IOException("校内资讯统一认证会话已过期，请重新登录")
 }

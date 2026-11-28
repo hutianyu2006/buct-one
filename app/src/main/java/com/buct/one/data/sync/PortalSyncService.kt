@@ -81,7 +81,7 @@ class PortalSyncService private constructor(
 
     private suspend fun <T> executeWithAutoRelogin(
         userInitiated: Boolean = false,
-        block: () -> T
+        block: suspend () -> T
     ): T {
         val sidBefore = SidPortalSessionVault.readCookies(appContext).first
         restoreSidPortalCookies()

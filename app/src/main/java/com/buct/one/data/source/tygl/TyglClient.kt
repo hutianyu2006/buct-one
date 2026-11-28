@@ -1,13 +1,14 @@
 package com.buct.one.data.source.tygl
 
+import com.buct.course.login.AndroidHttpClients
 import com.buct.course.login.BuctAesCrypto
 import com.buct.course.login.BuctDns
 import com.buct.course.login.BuctTlsTrustManager
 import com.buct.course.login.BuctWebVpn
 import com.buct.course.login.MatchingMemoryCookieJar
-import com.buct.one.data.model.TyglFitnessRecord
-import com.buct.one.data.model.TyglProfile
 import com.buct.one.data.model.TyglSnapshot
+import com.buct.one.data.source.tygl.TyglAuthExpiredException
+import com.buct.one.data.source.tygl.TyglGateway
 import okhttp3.Cookie
 import okhttp3.FormBody
 import okhttp3.HttpUrl
@@ -15,7 +16,6 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.IOException
-import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
 /**
@@ -393,81 +393,25 @@ class TyglClient {
         throw IOException("体测系统页面重定向次数过多")
     }
 
-    fun fetchFullSnapshot(): TyglSnapshot {
+    /**
+     * 抓取体测四类页面并解析——请求与解析全部复用共享 `TyglGateway`（与 iOS 同一份实现）。
+     *
+     * OkHttp 的 `cookieJar` 仍是登录/换票的事实来源：调用前把 tygl 与 sidportal 的 Cookie
+     * 种进共享 CookieStore，保证两个 HTTP 栈共享同一会话。
+     */
+    suspend fun fetchFullSnapshot(): TyglSnapshot {
         if (!authenticated && !authenticateWithSso()) {
             throw IOException("体测系统统一认证会话已失效，请重新登录")
         }
-
-        val defaultHtHtml = fetchAuthenticatedHtml("/main.php?module=stu&title=stu_ht_score")
-        val yearTabs = TyglParser.parseFitnessYearTabs(defaultHtHtml)
-        val (firstProfile, firstRecord) = TyglParser.parseFitnessPage(defaultHtHtml)
-
-        var profile: TyglProfile = firstProfile
-        val fitnessRecords = ArrayList<TyglFitnessRecord>()
-        val parsedYearKeys = HashSet<String>()
-        if (firstRecord != null) {
-            fitnessRecords.add(firstRecord)
-            parsedYearKeys.add(firstRecord.yearKey)
+        AndroidHttpClients.seedCookies("tygl.buct.edu.cn", cookieHeaderFor("$TYGL_BASE/main.php"))
+        AndroidHttpClients.seedCookies("sidportal.buct.edu.cn", exportSidPortalCookieHeader())
+        return try {
+            TyglGateway(AndroidHttpClients.session, userAgent = UA).fetchFullSnapshot()
+        } catch (expired: TyglAuthExpiredException) {
+            authenticated = false
+            throw IOException(expired.message ?: "体测系统统一认证会话已失效，请重新登录")
         }
-
-        if (yearTabs.isNotEmpty()) {
-            val orderedByTabs = ArrayList<TyglFitnessRecord>()
-            for ((tabKey, tabLabel) in yearTabs.take(6)) {
-                if (tabKey in parsedYearKeys) {
-                    fitnessRecords.firstOrNull { it.yearKey == tabKey }?.let { orderedByTabs.add(it) }
-                } else {
-                    val encodedYear = URLEncoder.encode(tabKey, "UTF-8")
-                    val yearHtml = runCatching {
-                        fetchAuthenticatedHtml("/main.php?module=stu&title=stu_ht_score&year=$encodedYear")
-                    }.getOrNull()
-                    if (yearHtml != null) {
-                        val (yrProfile, yrRecord) = TyglParser.parseFitnessPage(
-                            html = yearHtml,
-                            fallbackYearKey = tabKey,
-                            fallbackYearLabel = tabLabel
-                        )
-                        if (profile.studentName.isBlank() && yrProfile.studentName.isNotBlank()) {
-                            profile = yrProfile
-                        }
-                        if (yrRecord != null) {
-                            orderedByTabs.add(yrRecord)
-                            parsedYearKeys.add(yrRecord.yearKey)
-                        }
-                    }
-                }
-            }
-            for (rec in fitnessRecords) {
-                if (orderedByTabs.none { it.yearKey == rec.yearKey }) {
-                    orderedByTabs.add(rec)
-                }
-            }
-            fitnessRecords.clear()
-            fitnessRecords.addAll(orderedByTabs)
-        }
-
-        val sunTriple = runCatching {
-            val html = fetchAuthenticatedHtml("/main.php?module=stu&title=stu_sun_score")
-            TyglParser.parseSunScorePage(html)
-        }.getOrNull()
-
-        val peCourses = runCatching {
-            val html = fetchAuthenticatedHtml("/main.php?module=stu&title=stu_pe_score")
-            TyglParser.parsePeScorePage(html)
-        }.getOrDefault(emptyList())
-
-        val examInfo = runCatching {
-            val html = fetchAuthenticatedHtml("/main.php?module=stu&title=stu_exam")
-            TyglParser.parseExamPage(html)
-        }.getOrNull()
-
-        return TyglSnapshot(
-            profile = profile,
-            fitnessRecords = fitnessRecords,
-            runPlan = sunTriple?.first,
-            exerciseColumns = sunTriple?.second.orEmpty(),
-            exerciseTerms = sunTriple?.third.orEmpty(),
-            peCourses = peCourses,
-            examInfo = examInfo
-        )
     }
+
+    private fun cookieHeaderFor(url: String): String = cookieJar.cookieHeaderFor(url.toHttpUrl())
 }
