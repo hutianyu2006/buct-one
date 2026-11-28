@@ -131,6 +131,15 @@ class CasLoginController(
         }
     }
 
+    /**
+     * 平台认证器（通行密钥）已完成统一认证：把状态置为 [LoginState.Success]。
+     *
+     * 协议由 [CasPasskeyClient] 负责，本类只记录"谁登录成功了"，避免界面各自拼状态。
+     */
+    fun markPasskeySuccess(username: String) {
+        _state.value = LoginState.Success(username)
+    }
+
     fun reset() {
         _state.value = LoginState.Idle
     }

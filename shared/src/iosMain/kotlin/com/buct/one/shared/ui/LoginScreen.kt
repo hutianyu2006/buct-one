@@ -15,6 +15,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -45,6 +46,9 @@ internal fun LoginScreen(
     onSmsLogin: (String, String) -> Unit = { _, _ -> },
     rememberPassword: Boolean = false,
     onRememberPasswordChange: (Boolean) -> Unit = {},
+    passkeyMessage: String? = null,
+    passkeyBusy: Boolean = false,
+    onPasskeyLogin: (String) -> Unit = {},
 ) {
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
@@ -226,6 +230,14 @@ internal fun LoginScreen(
             }
         }
         Spacer(Modifier.height(8.dp))
+        OutlinedButton(
+            onClick = { onPasskeyLogin(username.trim()) },
+            enabled = !loading && !passkeyBusy && !smsMode && username.isNotBlank(),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(if (passkeyBusy) "正在验证通行密钥…" else "用通行密钥（Face ID / 指纹）登录")
+        }
+        Spacer(Modifier.height(8.dp))
         TextButton(
             onClick = {
                 smsMode = !smsMode
@@ -240,6 +252,13 @@ internal fun LoginScreen(
         }
 
         Spacer(Modifier.height(12.dp))
+        if (passkeyMessage != null) {
+            Text(
+                text = passkeyMessage,
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.error,
+            )
+        }
         when (state) {
             is LoginState.Failed -> Text(
                 text = state.message,

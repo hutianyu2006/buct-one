@@ -21,6 +21,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.buct.one.data.login.CasLoginController
+import com.buct.one.data.login.CasPasskeyClient
+import com.buct.one.data.login.PasskeyOutcome
 import com.buct.one.data.login.CasPasswordLoginClient
 import com.buct.one.data.login.CasSmsLoginClient
 import com.buct.one.data.login.LoginState
@@ -44,6 +46,7 @@ import com.buct.one.data.store.ScsSnapshotStore
 import com.buct.one.data.sync.ReloginWrapper
 import com.buct.one.data.sync.SsoReloginRunner
 import com.buct.one.platform.IosAppConfig
+import com.buct.one.platform.IosPasskeySigner
 import com.buct.one.platform.IosCredentialStore
 import com.buct.one.platform.UserDefaultsKeyValueStore
 import com.buct.one.platform.clearIosSessionCookies
@@ -94,6 +97,10 @@ fun App() {
                 smsClient = CasSmsLoginClient(httpClient = sessionClient, userAgent = iosUserAgent()),
             )
         }
+        val passkeyClient = remember {
+            CasPasskeyClient(httpClient = sessionClient, userAgent = iosUserAgent())
+        }
+        val passkeySigner = remember { IosPasskeySigner() }
         val reloginCoordinator = remember { createIosReloginCoordinator() }
         // 会话过期时自动用 Keychain 里的密码续期一次，失败才把「会话已失效」交给界面
         val reloginRunner = remember {
@@ -167,6 +174,8 @@ fun App() {
         var reloadKey by remember { mutableStateOf(0) }
         var selected by remember { mutableStateOf<AppNotice?>(null) }
         var skippedLogin by remember { mutableStateOf(false) }
+        var passkeyMessage by remember { mutableStateOf<String?>(null) }
+        var passkeyBusy by remember { mutableStateOf(false) }
         var rememberPassword by remember { mutableStateOf(IosCredentialStore.hasSaved(iosSecureVault)) }
         var section by remember { mutableStateOf(HomeSection.Notices) }
         val loggedInUsername = (loginState as? LoginState.Success)?.username
@@ -205,6 +214,51 @@ fun App() {
                     portalController.restoreFromCache()
                     portalController.refresh()
                 }
+            }
+        }
+
+        // 通行密钥：共享 CasPasskeyClient 负责协议，本机只做 Keychain 私钥 + Face ID 签名
+        suspend fun loginWithPasskey(username: String) {
+            passkeyBusy = true
+            passkeyMessage = null
+            try {
+                when (val options = passkeyClient.requestAuthentication(username)) {
+                    is PasskeyOutcome.OptionsReady -> {
+                        val credentialJson = passkeySigner.createAssertion(username, options.requestOptionsJson)
+                        if (credentialJson == null) {
+                            passkeyMessage = "本机没有可用通行密钥，请先用密码登录后创建"
+                        } else {
+                            when (
+                                val outcome = passkeyClient.finishAuthentication(
+                                    requestId = options.requestId,
+                                    finishPath = options.finishPath,
+                                    credentialJson = credentialJson,
+                                    sessionToken = options.sessionToken,
+                                    username = username,
+                                )
+                            ) {
+                                PasskeyOutcome.Success -> {
+                                    loginController.markPasskeySuccess(username)
+                                    if (rememberPassword) {
+                                        passkeyMessage = null
+                                    }
+                                }
+                                is PasskeyOutcome.Failed -> passkeyMessage = outcome.message
+                                else -> passkeyMessage = "通行密钥登录失败，请重试"
+                            }
+                        }
+                    }
+                    PasskeyOutcome.NotRegistered ->
+                        passkeyMessage = "该学号尚未创建通行密钥，请先用密码登录并在「我的」里创建"
+                    is PasskeyOutcome.Failed -> passkeyMessage = options.message
+                    else -> passkeyMessage = "通行密钥登录失败，请重试"
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                passkeyMessage = error.message?.takeIf { it.isNotBlank() } ?: "通行密钥登录失败，请重试"
+            } finally {
+                passkeyBusy = false
             }
         }
 
@@ -360,6 +414,9 @@ fun App() {
                             onSmsLogin = { username, smsCode ->
                                 scope.launch { loginController.loginWithSmsCode(username, smsCode) }
                             },
+                            passkeyMessage = passkeyMessage,
+                            passkeyBusy = passkeyBusy,
+                            onPasskeyLogin = { username -> scope.launch { loginWithPasskey(username) } },
                         )
                     }
                 }
