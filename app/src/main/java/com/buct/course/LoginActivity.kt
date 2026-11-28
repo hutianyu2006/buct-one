@@ -24,18 +24,17 @@ import com.buct.course.ui.theme.CourseSelectorTheme
 import com.buct.course.utils.CourseParser
 import com.buct.course.login.BuctSmsLoginManager
 import com.buct.course.login.BuctSsoLoginManager
-import com.buct.course.login.BuctWebAuthnManager
+import com.buct.course.login.AndroidHttpClients
+import com.buct.course.login.AndroidPasskeySigner
+import com.buct.one.data.login.CasPasskeyClient
+import com.buct.one.data.login.PasskeyOutcome
+import com.buct.one.data.session.SidPortalSessionVault
 import com.buct.course.login.PasswordLoginCallback
 import com.buct.course.login.PasswordLoginGateway
 import com.buct.course.login.PasswordLoginGatewayFactory
 import com.buct.course.academic.AcademicGatewayFactory
 import com.buct.course.academic.AcademicPasswordLoginGateway
 import com.buct.course.AcademicWebViewActivity
-import androidx.biometric.BiometricManager
-import androidx.biometric.BiometricPrompt
-import androidx.core.content.ContextCompat
-import com.buct.course.login.BuctSoftwarePasskey
-import java.security.Signature
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -52,8 +51,18 @@ class LoginActivity : androidx.fragment.app.FragmentActivity() {
 
     companion object {
         private const val TAG = "LoginActivity"
+
+        /** 通行密钥协议（sidportal）使用的 UA：与 Android 侧其它登录请求保持一致。 */
+        private const val PASSKEY_USER_AGENT =
+            "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
         const val EXTRA_RETURN_TO_CALLER = "return_to_caller"
         const val EXTRA_WEBVPN_AUTH_MODE = "webvpn_auth_mode"
+
+        /** 教务系统会话所在域（通行密钥登录成功后从这里取 Cookie 交给登录校验）。 */
+        private const val TEACHING_HOST = "jwglxt.buct.edu.cn"
+
+        /** 统一身份认证（sidportal）域：登录成功后把会话写回门户快照。 */
+        private const val SID_PORTAL_HOST = "sidportal.buct.edu.cn"
     }
 
     private val webVpnAuthMode: Boolean
@@ -101,13 +110,9 @@ class LoginActivity : androidx.fragment.app.FragmentActivity() {
     private var smsCookieJar: okhttp3.CookieJar? = null
     private val smsUa = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
 
-    // 通行密钥（原生 WebAuthn）状态
+    // 通行密钥状态（协议在共享 CasPasskeyClient，签名在本机 Keystore + 系统生物识别）
     private var passkeyInFlight = false
-    private var pendingPasskeyRequestId = ""
-    private var pendingPasskeyFinishUrl = ""
-    private var pendingPasskeySessionToken: String? = null
     private var pendingPasskeyUsername = ""
-    private var passkeyBiometricPrompt: BiometricPrompt? = null
     // 通行密钥注册（创建）状态
     private var passkeyNeedPassword by mutableStateOf(false)
     private var passkeyNeedCaptcha by mutableStateOf(false)
@@ -115,9 +120,6 @@ class LoginActivity : androidx.fragment.app.FragmentActivity() {
     private var pendingSidCookie = ""
     private var pendingRegisterUsername = ""
     private var pendingRegisterNickname = "北化课表"
-    private var pendingRegisterRequestId = ""
-    private var pendingRegisterFinishUrl = ""
-    private var pendingRegisterSessionToken: String? = null
     private var sidPortalSso: BuctSsoLoginManager? = null
 
     // WebView result launcher
@@ -409,59 +411,105 @@ class LoginActivity : androidx.fragment.app.FragmentActivity() {
         pendingPasskeyUsername = username
         errorMessage = null
         Log.d("BuctPasskey", "passkey native login, username=$username")
-        BuctWebAuthnManager.get().startAuthentication(username, passkeyAuthCallback)
+        lifecycleScope.launch { runPasskeyLogin(username) }
     }
 
-    private val passkeyAuthCallback: BuctWebAuthnManager.WebAuthnCallback =
-        object : BuctWebAuthnManager.WebAuthnCallback {
-        override fun onOptions(requestId: String, requestJson: String, finishUrl: String, sessionToken: String?) {
-            runOnUiThread {
-                pendingPasskeyRequestId = requestId
-                pendingPasskeyFinishUrl = finishUrl
-                pendingPasskeySessionToken = sessionToken
-                Log.d("BuctPasskey", "options ready, requestId=$requestId finish=$finishUrl")
-                startSoftwarePasskeyAuthentication(requestJson)
-            }
-        }
+    // 通行密钥协议全部交给共享 CasPasskeyClient（与 iOS 同一份实现），
+    // 本机只负责"Keystore 私钥 + 系统生物识别"这一步签名。
+    private val passkeyClient by lazy {
+        CasPasskeyClient(httpClient = AndroidHttpClients.session, userAgent = PASSKEY_USER_AGENT)
+    }
 
-        override fun onSuccess(cookie: String) {
-            runOnUiThread {
-                passkeyInFlight = false
-                passkeyNeedPassword = false
-                passkeyNeedCaptcha = false
-                Log.d("BuctPasskey", "passkey login success, cookie len=${cookie.length}")
-                val school = selectedLoginSchool ?: return@runOnUiThread
-                pendingPasswordLogin = false
-                performLoginValidation(school, cookie)
-            }
-        }
+    private val passkeySigner by lazy { AndroidPasskeySigner(this) }
 
-        override fun onError(message: String) {
-            runOnUiThread {
-                passkeyInFlight = false
-                if (message.contains("未注册") || message.contains("No credential") || message.contains("not registered")) {
-                    // 该学号没有可用通行密钥：直接在 App 内显示密码框，密码登录 sidportal 后
-                    // 创建新通行密钥；不再把用户赶去浏览器（浏览器注册后回到 App 仍可能因
-                    // 旧凭据未真正完成 finish 而无法认证）。
-                    passkeyNeedPassword = true
-                    passkeyNeedCaptcha = false
-                    passkeyCaptchaBytes.value = null
-                    errorMessage = "该学号尚未创建可用通行密钥。请输入统一认证密码，首次创建后即可用指纹/面部登录。"
-                } else {
-                    errorMessage = message
+    /** 阶段一：取认证选项 → 平台认证器签名 → 阶段二：提交断言并跟随票据。 */
+    private suspend fun runPasskeyLogin(username: String) {
+        val options = withContext(Dispatchers.IO) { passkeyClient.requestAuthentication(username) }
+        when (options) {
+            is PasskeyOutcome.OptionsReady -> {
+                if (!passkeySigner.hasCredential(username)) {
+                    // 服务端有凭据但本机没有私钥：引导密码登录后重新创建（与旧行为一致）
+                    requestPasskeyRegistration()
+                    return
                 }
+                val credentialJson = passkeySigner.createAssertion(username, options.requestOptionsJson)
+                if (credentialJson == null) {
+                    passkeyInFlight = false
+                    errorMessage = "通行密钥验证已取消或未通过，请重试"
+                    return
+                }
+                val outcome = withContext(Dispatchers.IO) {
+                    passkeyClient.finishAuthentication(
+                        requestId = options.requestId,
+                        finishPath = options.finishPath,
+                        credentialJson = credentialJson,
+                        sessionToken = options.sessionToken,
+                        username = username,
+                    )
+                }
+                finishPasskeyLogin(outcome)
+            }
+
+            PasskeyOutcome.NotRegistered -> requestPasskeyRegistration()
+
+            is PasskeyOutcome.Failed -> {
+                passkeyInFlight = false
+                errorMessage = options.message
+            }
+
+            else -> {
+                passkeyInFlight = false
+                errorMessage = "通行密钥登录失败，请重试"
             }
         }
     }
 
-    /** 引导用户在浏览器注册通行密钥：不 App 内创建（App 内创建曾 operation not allowed，浏览器侧可稳定创建） */
-    private fun guideBrowserRegister(reason: String) {
+    /** 该学号没有可用通行密钥：直接在 App 内显示密码框，密码登录 sidportal 后创建。 */
+    private fun requestPasskeyRegistration() {
+        passkeyInFlight = false
+        pendingPasskeyUsername = ""
+        passkeyNeedPassword = true
+        passkeyNeedCaptcha = false
+        passkeyCaptchaBytes.value = null
+        errorMessage = "该学号尚未创建可用通行密钥。请输入统一认证密码，首次创建后即可用指纹/面部登录。"
+    }
+
+    /** 断言提交成功 → 用教务系统会话 Cookie 走既有登录校验（与密码 / 短信登录同一条路径）。 */
+    private fun finishPasskeyLogin(outcome: PasskeyOutcome) {
+        if (outcome !is PasskeyOutcome.Success) {
+            passkeyInFlight = false
+            errorMessage = (outcome as? PasskeyOutcome.Failed)?.message ?: "通行密钥登录失败，请重试"
+            return
+        }
         passkeyInFlight = false
         passkeyNeedPassword = false
         passkeyNeedCaptcha = false
-        errorMessage = "$reason。\n\n请先在浏览器注册通行密钥：电脑或手机浏览器打开 https://sidportal.buct.edu.cn 登录 → 个人中心 → 安全设置 → 通行密钥管理 → 创建通行密钥（选择“连接手机”，按提示录指纹）。注册成功后回到本 App，点“通行密钥”直接用指纹登录。"
-        Toast.makeText(this@LoginActivity, "请先在浏览器注册通行密钥", Toast.LENGTH_LONG).show()
+        passkeyCaptchaBytes.value = null
+        persistPasskeySessions()
+        val school = selectedLoginSchool ?: return
+        val cookie = sessionCookieHeader(TEACHING_HOST)
+        if (cookie.isBlank()) {
+            errorMessage = "教务系统未返回有效会话，请重试"
+            return
+        }
+        Log.d("BuctPasskey", "passkey login success, cookie len=${cookie.length}")
+        pendingPasswordLogin = false
+        performLoginValidation(school, cookie)
     }
+
+    /** 共享 CookieStore 里的 sidportal 会话写回快照，供 i北化 / 教务消息等模块复用。 */
+    private fun persistPasskeySessions() {
+        val sidCookie = sessionCookieHeader(SID_PORTAL_HOST)
+        if (sidCookie.isNotBlank()) {
+            runCatching { SidPortalSessionVault.saveSidPortalCookies(applicationContext, sidCookie) }
+        }
+    }
+
+    private fun sessionCookieHeader(host: String): String = AndroidHttpClients.sessionCookieStore.load()
+        .asSequence()
+        .filter { it.domain.equals(host, ignoreCase = true) || host.endsWith("." + it.domain) }
+        .filter { it.name != "rememberMe" }
+        .joinToString("; ") { "${it.name}=${it.value}" }
 
     // ---------- 通行密钥注册（创建）流程 ----------
 
@@ -519,13 +567,7 @@ class LoginActivity : androidx.fragment.app.FragmentActivity() {
                     errorMessage = "创建会话失效，请重试"
                     return@runOnUiThread
                 }
-                // 网页端创建前必经「个人中心→安全设置页」：先探测建立管理上下文，再注册
-                BuctWebAuthnManager.get().probeSafeCenterContext(sidCookie) { mergedCookie ->
-                    runOnUiThread {
-                        BuctWebAuthnManager.get().startRegistration(
-                            mergedCookie, username, username, pendingRegisterNickname, registrationCallback)
-                    }
-                }
+                lifecycleScope.launch { runPasskeyRegistration(sidCookie, username) }
             }
         }
 
@@ -553,140 +595,52 @@ class LoginActivity : androidx.fragment.app.FragmentActivity() {
         }
     }
 
-    private fun startSoftwarePasskeyAuthentication(requestJson: String) {
-        val username = pendingPasskeyUsername
-        if (username.isBlank()) {
-            passkeyInFlight = false
-            errorMessage = "通行密钥会话已失效，请重新输入学号"
-            return
+    /** 创建通行密钥：预热管理页上下文 → 取创建选项 → 平台认证器建凭据 → 提交 → 立即用通行密钥登录。 */
+    private suspend fun runPasskeyRegistration(sidCookie: String, username: String) {
+        val options = withContext(Dispatchers.IO) {
+            // 网页端创建前必经「个人中心 → 安全设置页」，否则 register 返回 400 operation not allowed
+            passkeyClient.warmUpAccountContext(sidCookie)
+            passkeyClient.requestRegistration(sidCookie, username, username, pendingRegisterNickname)
         }
-        try {
-            val session = BuctSoftwarePasskey.beginAuthentication(this, username, requestJson)
-            promptPasskeyBiometric(
-                title = "通行密钥登录",
-                subtitle = "验证指纹、面部或设备密码",
-                signature = session.signature
-            ) {
-                try {
-                    val credentialJson = BuctSoftwarePasskey.completeAssertion(this@LoginActivity, session)
-                    BuctWebAuthnManager.get().submitAuthentication(
-                        pendingPasskeyRequestId, pendingPasskeyFinishUrl,
-                        credentialJson, pendingPasskeySessionToken, passkeyAuthCallback
+        when (options) {
+            is PasskeyOutcome.CreationOptionsReady -> {
+                val credentialJson = passkeySigner.createCredential(username, username, options.creationOptionsJson)
+                if (credentialJson == null) {
+                    passkeyInFlight = false
+                    errorMessage = "创建通行密钥失败：需要先在系统里录入指纹/面部或设置锁屏密码"
+                    return
+                }
+                val outcome = withContext(Dispatchers.IO) {
+                    passkeyClient.finishRegistration(
+                        sidCookie = sidCookie,
+                        requestId = options.requestId,
+                        finishPath = options.finishPath,
+                        credentialJson = credentialJson,
+                        sessionToken = options.sessionToken,
                     )
-                } catch (e: Exception) {
+                }
+                if (outcome is PasskeyOutcome.Registered) {
+                    Log.d("BuctPasskey", "passkey registered, now login")
+                    passkeyNeedPassword = false
+                    passkeyNeedCaptcha = false
+                    passkeyCaptchaBytes.value = null
+                    passkeyInFlight = true
+                    errorMessage = null
+                    runPasskeyLogin(username)
+                } else {
                     passkeyInFlight = false
-                    errorMessage = "通行密钥签名失败，请重试"
+                    errorMessage = (outcome as? PasskeyOutcome.Failed)?.message ?: "创建通行密钥失败，请重试"
                 }
             }
-        } catch (e: BuctSoftwarePasskey.NotRegisteredException) {
-            passkeyInFlight = false
-            passkeyNeedPassword = true
-            passkeyNeedCaptcha = false
-            passkeyCaptchaBytes.value = null
-            errorMessage = "该学号尚未创建可用通行密钥。请输入统一认证密码，首次创建后即可用指纹/面部登录。"
-        } catch (e: Exception) {
-            passkeyInFlight = false
-            errorMessage = "通行密钥不可用：${e.message}"
-        }
-    }
 
-    private fun promptPasskeyBiometric(
-        title: String,
-        subtitle: String,
-        signature: Signature? = null,
-        onSuccess: () -> Unit
-    ) {
-        val authenticators = BiometricManager.Authenticators.BIOMETRIC_STRONG or
-            BiometricManager.Authenticators.DEVICE_CREDENTIAL
-        val can = BiometricManager.from(this).canAuthenticate(authenticators)
-        if (can != BiometricManager.BIOMETRIC_SUCCESS) {
-            passkeyInFlight = false
-            errorMessage = "请先在系统设置中录入指纹/面部或设置锁屏密码"
-            return
-        }
-        var completed = false
-        val prompt = BiometricPrompt(
-            this,
-            ContextCompat.getMainExecutor(this),
-            object : BiometricPrompt.AuthenticationCallback() {
-                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                    if (completed) return
-                    completed = true
-                    onSuccess()
-                }
-                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
-                    if (completed) return
-                    completed = true
-                    passkeyInFlight = false
-                    if (errorCode != BiometricPrompt.ERROR_USER_CANCELED &&
-                        errorCode != BiometricPrompt.ERROR_CANCELED) {
-                        errorMessage = "通行密钥验证失败：$errString"
-                    }
-                }
-                override fun onAuthenticationFailed() {
-                    Toast.makeText(this@LoginActivity, "指纹/面部未识别，请重试", Toast.LENGTH_SHORT).show()
-                }
-            }
-        )
-        passkeyBiometricPrompt = prompt
-        val info = BiometricPrompt.PromptInfo.Builder()
-            .setTitle(title)
-            .setSubtitle(subtitle)
-            .setAllowedAuthenticators(authenticators)
-            .build()
-        if (signature != null) {
-            prompt.authenticate(info, BiometricPrompt.CryptoObject(signature))
-        } else {
-            prompt.authenticate(info)
-        }
-    }
-
-    private val registrationCallback: BuctWebAuthnManager.RegistrationCallback =
-        object : BuctWebAuthnManager.RegistrationCallback {
-        override fun onCreationOptions(requestId: String, creationJson: String, finishUrl: String, sessionToken: String?) {
-            runOnUiThread {
-                pendingRegisterRequestId = requestId
-                pendingRegisterFinishUrl = finishUrl
-                pendingRegisterSessionToken = sessionToken
-                val username = pendingRegisterUsername
-                Log.d("BuctPasskey", "creation options ready, requestId=$requestId")
-                promptPasskeyBiometric(
-                    title = "创建通行密钥",
-                    subtitle = "验证指纹、面部或设备密码"
-                ) {
-                    try {
-                        val credentialJson = BuctSoftwarePasskey.createCredential(
-                            this@LoginActivity, username, creationJson
-                        )
-                        BuctWebAuthnManager.get().submitRegistration(
-                            pendingSidCookie, pendingRegisterRequestId,
-                            pendingRegisterFinishUrl, credentialJson,
-                            pendingRegisterSessionToken, registrationCallback
-                        )
-                    } catch (e: Exception) {
-                        passkeyInFlight = false
-                        errorMessage = "创建通行密钥失败：${e.message}"
-                    }
-                }
-            }
-        }
-
-        override fun onRegistered() {
-            runOnUiThread {
-                Log.d("BuctPasskey", "passkey registered, now login")
-                // 创建成功 → 立即用通行密钥认证登录
-                passkeyNeedPassword = false
-                passkeyNeedCaptcha = false
-                passkeyInFlight = true
-                errorMessage = null
-                BuctWebAuthnManager.get().startAuthentication(pendingRegisterUsername, passkeyAuthCallback)
-            }
-        }
-
-        override fun onError(message: String) {
-            runOnUiThread {
+            is PasskeyOutcome.Failed -> {
                 passkeyInFlight = false
-                errorMessage = message
+                errorMessage = options.message
+            }
+
+            else -> {
+                passkeyInFlight = false
+                errorMessage = "创建通行密钥失败，请重试"
             }
         }
     }

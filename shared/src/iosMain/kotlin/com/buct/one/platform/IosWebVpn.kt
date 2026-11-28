@@ -31,4 +31,4 @@ internal fun createIosWebVpnSession(
 internal fun createIosWebVpnExecutor(
     httpClient: HttpClient,
     session: WebVpnSession = createIosWebVpnSession(httpClient),
-): WebVpnRequestExecutor = WebVpnRequestExecutor(httpClient = httpClient, session = session, userAgent = iosUserAgent())
+): WebVpnRequestExecutor = WebVpnRequestExecutor(client = httpClient, session = session, userAgent = iosUserAgent())

@@ -850,7 +850,7 @@ fun LoginScreen(
         )
     }
 
-    // 通行密钥现已原生实现（BuctWebAuthnManager + 系统 Credential Manager），不再使用网页浮层
+    // 通行密钥现已原生实现（共享 CasPasskeyClient 协议 + 本机 Keystore / 系统生物识别），不再使用网页浮层
     // 浮层保留仅兼容旧代码，永不显示
     if (false && showPortalLogin && isBuctSchool && onPortalCookie != null) {
         PortalLoginWebDialog(

@@ -219,6 +219,27 @@ class CasPasskeyClient(
         return parseCreationOptions(text)
     }
 
+    /**
+     * 注册前预热「通行密钥管理页」上下文（网页端也是先进「个人中心 → 安全设置」再创建）。
+     *
+     * 金智在缺少该上下文时会以 `400 operation not allowed` 拒绝 `/webauthn/register`；
+     * 预热失败不阻塞后续流程（由服务端最终判定），因此这里吞掉异常。
+     */
+    suspend fun warmUpAccountContext(sidCookie: String) {
+        try {
+            httpClient.get("$portalBaseUrl/account") {
+                header(HttpHeaders.UserAgent, userAgent)
+                header(HttpHeaders.Accept, "text/html,application/xhtml+xml")
+                header(HttpHeaders.Referrer, "$portalBaseUrl/login")
+                if (sidCookie.isNotBlank()) header(HttpHeaders.Cookie, sidCookie)
+            }.bodyAsText()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            // 预热是尽力而为：失败时继续走 register，让服务端给出明确原因
+        }
+    }
+
     /** 阶段二（注册）：提交创建结果。 */
     suspend fun finishRegistration(
         sidCookie: String,
