@@ -61,7 +61,7 @@ class SoftwarePasskeyAuthenticator(
         val credentialIdLength = byteArrayOf((credentialId.size ushr 8).toByte(), credentialId.size.toByte())
         val authData = authDataPrefix(rpIdHash, flags = 0x45, signCount = 0) +
             ByteArray(16) + credentialIdLength + credentialId + coseKey
-        val attestationObject = cborMap(
+        val attestationObject = cborTextMap(
             "fmt" to cborText("none"),
             "attStmt" to cborEmptyMap(),
             "authData" to cborBytes(authData),
@@ -165,7 +165,7 @@ class SoftwarePasskeyAuthenticator(
     private fun cborMap(vararg pairs: Pair<ByteArray, ByteArray>): ByteArray =
         pairs.fold(cborHead(5, pairs.size)) { acc, (key, value) -> acc + key + value }
 
-    private fun cborMap(vararg pairs: Pair<String, ByteArray>): ByteArray =
+    private fun cborTextMap(vararg pairs: Pair<String, ByteArray>): ByteArray =
         cborMap(*pairs.map { (key, value) -> cborText(key) to value }.toTypedArray())
 
     private fun cborEmptyMap(): ByteArray = cborHead(5, 0)
