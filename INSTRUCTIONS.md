@@ -84,28 +84,20 @@
 > `shared/commonMain/data/source/<域>/<Domain>Gateway.kt`（Ktor 请求 + 调用现有 `*Parser`） → `shared/commonMain/data/source/<域>/<Domain>Controller.kt`（组合 `DomainSync` + `*SnapshotStore`） → `shared/commonTest` 补 `MockEngine` 集成测试 → Android 侧 `SyncService` 改为委托共享 Gateway/Controller。  
 > 共享网关/控制器已落地的域，只剩最后一步"Android 改委托"与平台参数注入。
 
-#### Task 1.1：宿舍电费 —— 签名密钥平台注入（Android 改委托已完成）
-- **现状**：`ElectricityGatewayClient` / `ElectricityController` / `ElectricitySnapshotStore` / 共享宿舍字典均已落地，iOS 已有页面；`ElectricitySyncService` 与 `ElectricityStore` 已改走共享实现。
+> **Phase 1 已全部完成**（电费签名密钥注入、门户/体测 Android 改委托、第二课堂网关下沉 + iOS 页面），
+> 落地细节见 `docs/规划.md`。下面只保留尚未接通的 iOS 门户页面。
+
+#### Task 1.5：iOS i北化页面
+- **现状**：`PortalGateway`（校历 / 教学周 / 在借图书 / 四栏资讯）已下沉，Android `PortalClient` 已改委托；
+  iOS 尚无对应页面（只有网关与 `PortalGatewayTest`）。
 - **做什么**：
-  1. `BuildConfig.ELECTRICITY_SIGN_SECRET` 通过平台配置接口注入共享层（Android 由 `:app` 传入；iOS 由 `Info.plist` / xcconfig 注入），**不要在 `commonMain` 硬编码密钥**。当前 iOS `App.kt` 调用 `refresh(signSecret = "")`，属临时占位，需一并补上。
-- **验收**：Android 电费页数据、缓存、封禁提示与低余额提醒行为不变；共享层签名逻辑仍由 `:shared:jvmTest` 覆盖。
-
-#### Task 1.2：i北化（Portal）—— Android 改委托 + iOS 页面
-- **现状**：`PortalGateway`（校历 / 教学周 / 在借图书 / 四栏资讯）已下沉，`PortalSyncService` 仍走 `app/.../data/source/portal/PortalClient.kt`，iOS 无页面。
-- **做什么**：
-  1. `PortalSyncService` 改委托 `PortalGateway`，保留三份快照状态（calendar / library / news）与 `PortalParser.PARSER_VERSION` 语义。
-  2. iOS 新增「i北化」页：校历与当前教学周、图书馆在借清单与应还提醒、四栏资讯列表与正文阅读；校外依赖 Task 0.3 的 WebVPN 链路。
-- **验收**：Android 门户三块数据与校历自动校准行为不变；iOS 页面具备会话失效单独提示与失败保留旧快照。
-
-#### Task 1.3：体测与体育（TYGL）—— Android 改委托
-- **现状**：`TyglGateway` + `TyglController` 已下沉，iOS 已有「体测」页，`TyglSyncService` 仍走 `app/.../data/source/tygl/TyglClient.kt`。
-- **做什么**：`TyglSyncService` 改委托共享 `TyglGateway` / `TyglController`；确认"多学年抓取、站内重定向跟随、非 `tygl.buct.edu.cn` 跳转拒绝、登录页抛 `TyglAuthExpiredException`"这些共享行为在 Android 侧完整生效，且 `SsoSilentRelogin` 重登路径与 Task 0.1 的共享实现对接。
-- **验收**：Android 体测页历年成绩、阳光跑、体育课成绩、理论考试与算分模拟器行为不变。
-
-#### Task 1.4：第二课堂（SCS）网关下沉
-- **现状**：只有 `ScsParser` 在共享层，`app/.../data/source/scs/ScsClient.kt` 仍是 Android 独占。
-- **做什么**：迁移 `ScsClient.kt` 为 `shared/commonMain/.../data/source/scs/ScsGateway.kt`（CAS 换 JWT，依赖 Task 0.3 的 WebVPN 访问 `scs.buct.edu.cn` / `eapi.buct.edu.cn`），配套 `ScsController` + `ScsSnapshotStore`；补 `MockEngine` 测试（五育总分、分类得分、自评窗口、活动清单、会话失效识别）；Android `ScsSyncService` 改委托，iOS 接页面。
-- **验收**：`parserVersion` 语义与 Android 现有快照兼容；失败保留旧快照。
+  1. 在 `shared/src/iosMain/.../ui/` 新增「i北化」页：校历与当前教学周、图书馆在借清单与应还提醒、
+     四栏资讯列表与正文阅读（复用现有 `Markdown` / 主题组件）。
+  2. 新增 `PortalController`（组合 `DomainSync` + 新的 `PortalSnapshotStore`，三份快照 calendar / library / news），
+     会话失效单独成态，失败保留旧快照。
+  3. 校外访问依赖 `WebVpnRequestExecutor`（Phase 0 已完成）；确认 `i.buct.edu.cn` / `mnews.buct.edu.cn`
+     都走「直连优先 → 403 转代理」链路。
+- **验收**：iOS 能看校历/教学周、在借图书与四栏资讯；`:shared:jvmTest` 覆盖 Controller 的失败保留旧快照与会话失效分支。
 
 ---
 
