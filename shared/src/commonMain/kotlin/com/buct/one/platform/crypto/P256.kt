@@ -58,9 +58,10 @@ internal object P256 {
         while (true) {
             val k = fromBytes(secureRandomBytes(32)) % (n - one) + one
             val point = multiply(Point(gx, gy), k)
-            val r = mod(point.x)
+            // ECDSA 的 r/s 都在群阶 n 上取模（不是域素数 p）
+            val r = modN(point.x)
             if (r == zero) continue
-            val s = mod(modInverse(k) * (digest + r * d))
+            val s = modN(modInverseN(k) * (digest + r * d))
             if (s == zero) continue
             return derEncode(r, s)
         }
@@ -125,7 +126,12 @@ internal object P256 {
 
     private fun mod(value: BigInteger): BigInteger = ((value % p) + p) % p
 
+    private fun modN(value: BigInteger): BigInteger = ((value % n) + n) % n
+
     private fun modInverse(value: BigInteger): BigInteger = value.modInverse(p)
+
+    /** ECDSA 的 k^-1 必须在群阶 n 上求逆，用 p 会算出无法验签的签名。 */
+    private fun modInverseN(value: BigInteger): BigInteger = modN(value).modInverse(n)
 
     private fun fromBytes(bytes: ByteArray): BigInteger {
         if (bytes.isEmpty()) return zero
