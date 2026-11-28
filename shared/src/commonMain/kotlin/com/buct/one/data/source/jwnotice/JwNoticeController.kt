@@ -5,6 +5,7 @@ import com.buct.one.data.model.JwAnnouncementItem
 import com.buct.one.data.model.JwNoticeSnapshot
 import com.buct.one.data.store.JwNoticeSnapshotStore
 import com.buct.one.data.sync.DomainSync
+import com.buct.one.data.sync.ReloginWrapper
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -29,6 +30,12 @@ sealed interface JwNoticeUiState {
 class JwNoticeController(
     private val gateway: JwNoticeGateway,
     private val cache: JwNoticeSnapshotStore? = null,
+    /**
+     * 会话失效时的静默重登包装（可选）：注入后，[refresh] 遇到
+     * [JwAuthExpiredException] 会先尝试自动续期一次，成功则继续，失败才落到
+     * [JwNoticeUiState.AuthExpired] 提示用户手动登录。
+     */
+    private val withRelogin: ReloginWrapper<JwNoticeSnapshot> = ReloginWrapper.passthrough(),
 ) {
 
     /** 四条数据层铁律由共享 [DomainSync] 统一执行（失败保留旧数据、capturedAt 单调、NEVER≠EMPTY）。 */
@@ -48,7 +55,7 @@ class JwNoticeController(
     suspend fun refresh() {
         _state.value = JwNoticeUiState.Loading
         _state.value = try {
-            val snapshot = gateway.fetchFullSnapshot()
+            val snapshot = withRelogin.fetch { gateway.fetchFullSnapshot() }
             val slice = sync.commitSuccess(snapshot)
             cache?.save(snapshot, slice.provenance.capturedAt)
             JwNoticeUiState.Loaded(snapshot, slice.provenance)

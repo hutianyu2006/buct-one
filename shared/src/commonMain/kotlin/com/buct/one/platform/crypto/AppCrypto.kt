@@ -16,6 +16,13 @@ interface AppCrypto {
 
     fun aesEcbDecrypt(cipherBytes: ByteArray, key: ByteArray): ByteArray
 
+    /**
+     * RSA 公钥加密（PKCS#1 v1.5），用于通行密钥（WebAuthn）握手：
+     * 校方前端用 JSEncrypt 把 AES 会话密钥用固定 RSA 公钥加密后放进 `privateKey` 请求头。
+     * 平台实现（Android JCA / iOS Security）由 `platform/crypto` 各自提供，共享层只调接口。
+     */
+    fun rsaEncryptPkcs1(publicKeyDer: ByteArray, plainBytes: ByteArray): ByteArray
+
     /** 仅用于复刻校方前端 Csrf-Value（MD5），不用于安全目的。 */
     fun md5(bytes: ByteArray): ByteArray
 
@@ -34,6 +41,9 @@ object BuiltinCrypto : AppCrypto {
 
     override fun aesEcbDecrypt(cipherBytes: ByteArray, key: ByteArray): ByteArray =
         AesCbc.decryptEcbPkcs7(cipherBytes, key)
+
+    override fun rsaEncryptPkcs1(publicKeyDer: ByteArray, plainBytes: ByteArray): ByteArray =
+        Rsa.encryptPkcs1(publicKeyDer, plainBytes)
 
     override fun md5(bytes: ByteArray): ByteArray = Md5.hash(bytes)
 

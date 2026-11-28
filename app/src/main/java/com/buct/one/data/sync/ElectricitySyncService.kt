@@ -1,7 +1,7 @@
 package com.buct.one.data.sync
 
 import android.content.Context
-import com.buct.course.BuildConfig
+import com.buct.course.login.AndroidAppConfig
 import com.buct.course.manager.UserManager
 import com.buct.one.data.model.DomainSlice
 import com.buct.one.data.model.ElectricityReading
@@ -157,7 +157,8 @@ class ElectricitySyncService private constructor(
             }
 
             val clientId = store.getOrCreateClientId()
-            val signSecret = BuildConfig.ELECTRICITY_SIGN_SECRET.trim()
+            // 密钥统一由平台配置注入（Android BuildConfig / iOS Info.plist），共享层不硬编码
+            val signSecret = AndroidAppConfig.electricitySignSecret
 
             _syncing.value = true
             try {

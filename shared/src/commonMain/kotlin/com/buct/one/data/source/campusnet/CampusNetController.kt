@@ -4,6 +4,7 @@ import com.buct.one.data.model.CampusNetSnapshot
 import com.buct.one.data.model.Provenance
 import com.buct.one.data.store.CampusNetSnapshotStore
 import com.buct.one.data.sync.DomainSync
+import com.buct.one.data.sync.ReloginWrapper
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -20,6 +21,8 @@ sealed interface CampusNetUiState {
 class CampusNetController(
     private val gateway: CampusNetGateway,
     private val cache: CampusNetSnapshotStore? = null,
+    /** 会话失效时的静默重登包装（可选），语义与 JwNoticeController 一致。 */
+    private val withRelogin: ReloginWrapper<CampusNetSnapshot> = ReloginWrapper.passthrough(),
 ) {
 
     private val sync = DomainSync<CampusNetSnapshot>(
@@ -49,7 +52,7 @@ class CampusNetController(
     suspend fun refresh(studentId: String) {
         _state.value = CampusNetUiState.Loading
         _state.value = try {
-            val snapshot = gateway.fetchBillingSnapshot(studentId)
+            val snapshot = withRelogin.fetch { gateway.fetchBillingSnapshot(studentId) }
             val slice = sync.commitSuccess(snapshot)
             cache?.save(snapshot, slice.provenance.capturedAt)
             CampusNetUiState.Loaded(snapshot, slice.provenance)

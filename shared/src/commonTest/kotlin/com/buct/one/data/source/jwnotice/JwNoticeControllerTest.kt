@@ -5,6 +5,10 @@ import com.buct.one.data.model.JwNoticeSnapshot
 import com.buct.one.data.model.JwReminderCategory
 import com.buct.one.data.model.JwReminderItem
 import com.buct.one.data.store.JwNoticeSnapshotStore
+import com.buct.one.data.sync.ReloginWrapper
+import com.buct.one.data.sync.SsoCredentials
+import com.buct.one.data.sync.SsoReloginRunner
+import com.buct.one.data.sync.SsoSilentReloginCoordinator
 import com.buct.one.platform.InMemoryKeyValueStore
 import com.buct.one.platform.buildHttpClient
 import io.ktor.client.engine.mock.MockEngine
@@ -78,6 +82,59 @@ class JwNoticeControllerTest {
         assertTrue(state is JwNoticeUiState.Loaded)
         assertEquals(1, (state as JwNoticeUiState.Loaded).snapshot.reminders.size)
         assertEquals("缓存提醒", state.snapshot.reminders[0].title)
+    }
+
+    @Test
+    fun refresh_usesReloginWrapperOnceThenSucceeds() = runTest {
+        var wrapperCalls = 0
+        var engineCalls = 0
+        var loginCalls = 0
+        val engine = MockEngine { request ->
+            engineCalls++
+            if (engineCalls == 1) {
+                // 第一次请求：会话已失效（登录页 HTML）
+                respond(
+                    "<html><body><p id=\"login-page-flowkey\">x</p></body></html>",
+                    HttpStatusCode.OK,
+                    headersOf(HttpHeaders.ContentType, "application/json"),
+                )
+            } else {
+                val body = if (request.url.encodedPath.contains("cxDbsy")) remindersJson else announcementsJson
+                respond(body, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
+            }
+        }
+        val coordinator = SsoSilentReloginCoordinator(
+            credentialsProvider = { SsoCredentials("20230001", "p@ss".toCharArray()) },
+        )
+        val runner = SsoReloginRunner(coordinator) { _, _ -> loginCalls++; true }
+        val controller = JwNoticeController(
+            JwNoticeGateway(buildHttpClient(engine), userAgent = "test-UA"),
+            withRelogin = ReloginWrapper { block ->
+                wrapperCalls++
+                runner.run { block() }
+            },
+        )
+        controller.refresh()
+        assertTrue(controller.state.value is JwNoticeUiState.Loaded)
+        assertEquals(1, wrapperCalls)
+        // 会话失效 → 静默重登一次 → 重试成功（不再落到 AuthExpired）
+        assertEquals(1, loginCalls)
+        assertTrue(engineCalls >= 3, "expected retry, got $engineCalls requests")
+    }
+
+    @Test
+    fun refresh_reloginWrapperFailure_fallsBackToAuthExpired() = runTest {
+        val controller = JwNoticeController(
+            JwNoticeGateway(
+                buildHttpClient(MockEngine { error("expired") }),
+                userAgent = "test-UA",
+            ),
+            withRelogin = ReloginWrapper { throw JwAuthExpiredException("教务会话已失效，请重新登录") },
+        )
+        controller.refresh()
+        val state = controller.state.value as? JwNoticeUiState.AuthExpired
+        assertTrue(state != null)
+        assertEquals("教务会话已失效，请重新登录", state!!.message)
     }
 
     @Test

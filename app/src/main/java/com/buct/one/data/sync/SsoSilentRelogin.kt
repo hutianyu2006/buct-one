@@ -5,82 +5,94 @@ import android.os.SystemClock
 import com.buct.course.manager.SyncSettings
 import com.buct.course.manager.UserManager
 import com.buct.one.data.session.SidPortalSessionVault
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 
 /**
- * 统一身份认证（sidportal）跨模块单飞静默重登协调器。
+ * 统一身份认证（sidportal）跨模块单飞静默重登协调器（Android 侧薄适配）。
  *
- * 当任一接入统一身份认证的模块（北化在线 / 实践教学 / 第二课堂 / 体测平台）遇到会话过期或无有效 TGT 时，
- * 若本地开启了「在线同步」且已安全保存学号密码，则加锁尝试重登一次并更新 [SidPortalSessionVault]，
- * 并发到达的其它模块可直接复用已刷新的根凭证，避免弹出“请重新登录”打断用户。
+ * 真正的单飞加锁、30s 失败冷却、快照短路与凭据清零逻辑都在共享层
+ * [SsoSilentReloginCoordinator]，这里只负责把 Android 的平台差异注入进去：
+ * 「在线同步」开关、[UserManager] 中的学号密码、Keystore 加密的 sidportal Cookie 快照。
  *
  * 包结构约束：sync -> source, store, session, model；严禁依赖 ui。
  */
 internal object SsoSilentRelogin {
 
-    private val reloginMutex = Mutex()
-    private const val FAILURE_COOLDOWN_MS = 30_000L
-
-    @Volatile
-    private var lastFailureAtMs: Long = 0L
-
-    fun resetCooldown() {
-        lastFailureAtMs = 0L
-    }
-
-    fun isAuthFailure(error: Throwable?): Boolean = isAuthFailureMessage(error?.message)
-
-    fun isAuthFailureMessage(message: String?): Boolean {
-        val text = message?.trim().orEmpty()
-        if (text.isEmpty()) return false
-        return listOf("登录", "过期", "失效", "会话", "未建立", "认证", "票据", "401", "403")
-            .any { keyword -> text.contains(keyword, ignoreCase = true) }
-    }
-
-    fun hasSavedCredentials(context: Context): Boolean {
+    /**
+     * 共享层 [SsoReloginRunner] 需要的凭据来源（Android 侧注入「在线同步」开关与 UserManager）。
+     * 每次调用都重新读 [UserManager]：账号切换 / 删除密码后立即生效，不做跨调用缓存。
+     * 返回 null 表示当前不允许（同步关闭、演示模式）或没有可用凭据。
+     */
+    fun credentialsSource(context: Context): SsoCredentialsSource {
         val app = context.applicationContext
-        if (!SyncSettings.enabled(app)) return false
-        val user = UserManager.getInstance().apply { init(app) }
-        if (user.isDemoMode) return false
-        val username = user.username.ifBlank { user.studentId.orEmpty() }
-        return username.isNotBlank() && !user.accountPassword.isNullOrEmpty()
+        return SsoCredentialsSource {
+            if (!SyncSettings.enabled(app)) {
+                null
+            } else {
+                val user = UserManager.getInstance().apply { init(app) }
+                if (user.isDemoMode) {
+                    null
+                } else {
+                    val username = user.username.ifBlank { user.studentId.orEmpty() }
+                    val password = user.accountPassword
+                    if (username.isBlank() || password.isNullOrEmpty()) {
+                        null
+                    } else {
+                        SsoCredentials(username, password.toCharArray())
+                    }
+                }
+            }
+        }
     }
+
+    private fun coordinatorFor(context: Context): SsoSilentReloginCoordinator {
+        val app = context.applicationContext
+        val source = credentialsSource(app)
+        return SsoSilentReloginCoordinator(
+            credentialsProvider = { source.current() },
+            sidCookieProvider = { SidPortalSessionVault.readCookies(app).first },
+            // 单调时钟：不受系统时间调整影响，避免冷却被时钟回拨绕过
+            clock = { SystemClock.elapsedRealtime() },
+        )
+    }
+
+    /** 用户重新登录成功后调用：清掉失败冷却，让下一次业务请求可以立即重试。 */
+    fun resetCooldown() {
+        instance?.resetCooldown()
+    }
+
+    fun isAuthFailure(error: Throwable?): Boolean = SsoSilentReloginCoordinator.isAuthFailure(error)
+
+    fun isAuthFailureMessage(message: String?): Boolean =
+        SsoSilentReloginCoordinator.isAuthFailureMessage(message)
+
+    fun hasSavedCredentials(context: Context): Boolean = coordinatorFor(context).hasSavedCredentials()
 
     suspend fun attemptRelogin(
         context: Context,
         sidSnapshotBefore: String,
         bypassCooldown: Boolean = false,
         performLogin: suspend (username: String, passwordChars: CharArray) -> Boolean
-    ): Boolean = reloginMutex.withLock {
-        val app = context.applicationContext
-        val latestSid = SidPortalSessionVault.readCookies(app).first
-        if (latestSid.isNotBlank() && latestSid != sidSnapshotBefore) {
-            lastFailureAtMs = 0L
-            return@withLock true
-        }
-        val now = SystemClock.elapsedRealtime()
-        if (!bypassCooldown && lastFailureAtMs > 0L && now - lastFailureAtMs < FAILURE_COOLDOWN_MS) {
-            return@withLock false
-        }
-        if (!SyncSettings.enabled(app)) return@withLock false
-        val user = UserManager.getInstance().apply { init(app) }
-        if (user.isDemoMode) return@withLock false
-        val username = user.username.ifBlank { user.studentId.orEmpty() }
-        val password = user.accountPassword
-        if (username.isBlank() || password.isNullOrEmpty()) return@withLock false
+    ): Boolean = processWide(context).attemptRelogin(
+        sidSnapshotBefore = sidSnapshotBefore,
+        bypassCooldown = bypassCooldown,
+        performLogin = performLogin,
+    )
 
-        val passwordChars = password.toCharArray()
-        val ok = try {
-            runCatching { performLogin(username, passwordChars) }.getOrDefault(false)
-        } finally {
-            passwordChars.fill('\u0000')
-        }
-        if (ok) {
-            lastFailureAtMs = 0L
-        } else {
-            lastFailureAtMs = SystemClock.elapsedRealtime()
-        }
-        ok
+    /**
+     * 进程级共享实例：冷却时间与单飞锁必须跨调用点共享，
+     * 否则每个模块各建一个实例会让「并发重登只打一次」失效。
+     */
+    private var instance: SsoSilentReloginCoordinator? = null
+    private var instanceAppContext: Context? = null
+
+    @Synchronized
+    private fun processWide(context: Context): SsoSilentReloginCoordinator {
+        val app = context.applicationContext
+        val existing = instance
+        if (existing != null && app === instanceAppContext) return existing
+        val created = coordinatorFor(app)
+        instance = created
+        instanceAppContext = app
+        return created
     }
 }

@@ -17,6 +17,7 @@ import io.ktor.http.headersOf
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class CasPasswordLoginClientTest {
@@ -132,6 +133,67 @@ class CasPasswordLoginClientTest {
         val client = buildHttpClient(engine, followRedirects = false)
         val outcome = CasPasswordLoginClient(client, userAgent = "test-UA").login("20230001", "p@ss")
         assertEquals(CasLoginOutcome.Failed("统一认证密钥缺失，请重新登录"), outcome)
+    }
+
+    @Test
+    fun fetchCaptcha_sharesCookieSessionWithLogin() = runTest {
+        var captchaCookie: String? = null
+        var loginCookie: String? = null
+        var captchaRequested = false
+        val png = ByteArray(64) { 0x42 }
+        val engine = MockEngine { request ->
+            when {
+                request.url.encodedPath == "/api/captcha/generate/DEFAULT" -> {
+                    captchaRequested = true
+                    captchaCookie = request.headers[HttpHeaders.Cookie]
+                    respond(
+                        png,
+                        HttpStatusCode.OK,
+                        headersOf(
+                            HttpHeaders.ContentType to listOf("image/png"),
+                            // 验证码凭据种在会话 Cookie 上，随后的表单提交必须带同一个
+                            HttpHeaders.SetCookie to listOf("captcha_session=abc; Path=/"),
+                        ),
+                    )
+                }
+                request.url.encodedPath == "/login" && request.method == HttpMethod.Get ->
+                    respond(loginPage(), HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "text/html"))
+                request.url.encodedPath == "/login" -> {
+                    loginCookie = request.headers[HttpHeaders.Cookie]
+                    respond("", HttpStatusCode.Found, headersOf(HttpHeaders.Location to listOf("/account")))
+                }
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val client = buildHttpClient(engine, followRedirects = false, keepCookies = true)
+        val cas = CasPasswordLoginClient(client, userAgent = "test-UA")
+
+        val bytes = cas.fetchCaptchaPng()
+        assertTrue(captchaRequested)
+        assertEquals(64, bytes!!.size)
+        assertTrue(captchaCookie.isNullOrBlank())
+
+        val outcome = cas.login("20230001", "p@ss", captchaCode = "1234")
+        assertEquals(CasLoginOutcome.Success, outcome)
+        // 同一个 HttpClient（同一个 Cookie 存储）→ 登录表单带上了验证码会话 Cookie
+        assertTrue(loginCookie?.contains("captcha_session=abc") == true)
+    }
+
+    @Test
+    fun fetchCaptcha_returnsNullOnTinyOrErrorResponse() = runTest {
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/api/captcha/generate/DEFAULT" -> respond(
+                    ByteArray(4),
+                    HttpStatusCode.OK,
+                    headersOf(HttpHeaders.ContentType, "image/png"),
+                )
+                else -> respond("", HttpStatusCode.InternalServerError)
+            }
+        }
+        val client = buildHttpClient(engine, followRedirects = false)
+        val cas = CasPasswordLoginClient(client, userAgent = "test-UA")
+        assertNull(cas.fetchCaptchaPng())
     }
 
     @Test

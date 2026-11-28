@@ -7,5 +7,9 @@
 	     其余 Info.plist 键仍由 GENERATE_INFOPLIST_FILE 生成并合并。 -->
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
+	<!-- 构建期注入的密钥（xcconfig / CI secret）。缺失时共享层读到空串，
+	     电费查询会明确失败但不会崩溃，也绝不会回退到硬编码常量。 -->
+	<key>ElectricitySignSecret</key>
+	<string>$(ELECTRICITY_SIGN_SECRET)</string>
 </dict>
 </plist>

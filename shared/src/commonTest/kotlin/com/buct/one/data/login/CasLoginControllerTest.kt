@@ -62,4 +62,53 @@ class CasLoginControllerTest {
         val state = controller.state.value
         assertTrue(state is LoginState.CaptchaRequired)
     }
+
+    @Test
+    fun captchaState_carriesPngBytesForUiDecoding() = runTest {
+        val png = ByteArray(48) { 0x11 }
+        val engine = MockEngine { request ->
+            when {
+                request.url.encodedPath == "/api/captcha/generate/DEFAULT" ->
+                    respond(png, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "image/png"))
+                request.method == HttpMethod.Get ->
+                    respond(loginPage, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "text/html"))
+                else -> respond(
+                    "<p id=\"login-croypto\">MDEyMzQ1Njc4OWFiY2RlZg==</p><p id=\"captcha-url\">/captcha</p>",
+                    HttpStatusCode.OK,
+                    headersOf(HttpHeaders.ContentType, "text/html"),
+                )
+            }
+        }
+        val controller = CasLoginController(
+            CasPasswordLoginClient(buildHttpClient(engine, followRedirects = false), userAgent = "test-UA"),
+        )
+        controller.login("20230001", "p@ss")
+        val state = controller.state.value as? LoginState.CaptchaRequired
+        assertTrue(state != null)
+        assertEquals(48, state!!.pngBytes.size)
+    }
+
+    @Test
+    fun captchaState_pngEmptyWhenFetchFails() = runTest {
+        val engine = MockEngine { request ->
+            when {
+                request.url.encodedPath == "/api/captcha/generate/DEFAULT" ->
+                    respond("", HttpStatusCode.InternalServerError)
+                request.method == HttpMethod.Get ->
+                    respond(loginPage, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "text/html"))
+                else -> respond(
+                    "<p id=\"login-croypto\">MDEyMzQ1Njc4OWFiY2RlZg==</p><p id=\"captcha-url\">/captcha</p>",
+                    HttpStatusCode.OK,
+                    headersOf(HttpHeaders.ContentType, "text/html"),
+                )
+            }
+        }
+        val controller = CasLoginController(
+            CasPasswordLoginClient(buildHttpClient(engine, followRedirects = false), userAgent = "test-UA"),
+        )
+        controller.login("20230001", "p@ss")
+        val state = controller.state.value as? LoginState.CaptchaRequired
+        assertTrue(state != null)
+        assertEquals(0, state!!.pngBytes.size)
+    }
 }

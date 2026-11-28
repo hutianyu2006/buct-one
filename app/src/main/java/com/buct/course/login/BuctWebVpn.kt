@@ -1,6 +1,7 @@
 package com.buct.course.login
 
 import android.os.SystemClock
+import com.buct.one.platform.network.WebVpnCodec
 import okhttp3.FormBody
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -20,9 +21,6 @@ import java.net.UnknownHostException
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
-import javax.crypto.Cipher
-import javax.crypto.spec.IvParameterSpec
-import javax.crypto.spec.SecretKeySpec
 
 /**
  * 校外访问校内系统时无法建立或刷新 WebVPN（w.buct.edu.cn）统一身份认证会话。
@@ -49,8 +47,6 @@ object BuctWebVpn {
 
     private const val SID_PORTAL_HOST = "sidportal.buct.edu.cn"
     private const val SID_PORTAL_BASE = "https://sidportal.buct.edu.cn"
-    private const val CRYPT_KEY = "wrdvpnisthebest!"
-    private const val CRYPT_IV = "wrdvpnisthebest!"
 
     private const val PREFER_VPN_TTL_MS = 300_000L
     private const val TICKET_SOFT_TTL_MS = 1_800_000L
@@ -67,9 +63,6 @@ object BuctWebVpn {
         "mnews.buct.edu.cn",
         "tree.buct.edu.cn"
     )
-
-    private val keyBytes = CRYPT_KEY.toByteArray(Charsets.US_ASCII)
-    private val ivBytes = CRYPT_IV.toByteArray(Charsets.US_ASCII)
 
     @Volatile
     private var readSidCookiesFn: (() -> String)? = null
@@ -230,87 +223,21 @@ object BuctWebVpn {
         return false
     }
 
-    fun encryptHost(host: String): String {
-        val plain = host.trim().lowercase(Locale.ROOT).toByteArray(Charsets.UTF_8)
-        val cipher = Cipher.getInstance("AES/CFB/NoPadding")
-        cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(keyBytes, "AES"), IvParameterSpec(ivBytes))
-        val encrypted = cipher.doFinal(plain)
-        return toLowerHex(ivBytes) + toLowerHex(encrypted)
-    }
+    /** 主机名 → WebVPN 加密 token（委托共享 [WebVpnCodec]，消除双份 AES-CFB 实现漂移）。 */
+    fun encryptHost(host: String): String = WebVpnCodec.encryptHost(host)
 
-    fun decryptHost(hexToken: String): String? {
-        val clean = hexToken.trim()
-        if (clean.length <= 32 || clean.length % 2 != 0) return null
-        val tokenIv = hexToBytes(clean.substring(0, 32)) ?: return null
-        val ct = hexToBytes(clean.substring(32)) ?: return null
-        return runCatching {
-            val cipher = Cipher.getInstance("AES/CFB/NoPadding")
-            cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(keyBytes, "AES"), IvParameterSpec(tokenIv))
-            val plain = String(cipher.doFinal(ct), Charsets.UTF_8).trim()
-            plain.takeIf { h ->
-                h.isNotEmpty() && !h.any { ch -> ch <= ' ' || ch == '/' || ch == '\\' }
-            }
-        }.getOrNull()
-    }
+    fun decryptHost(hexToken: String): String? = WebVpnCodec.decryptHost(hexToken)
 
     fun toVpnUrl(original: HttpUrl): HttpUrl {
         if (original.host.equals(VPN_HOST, ignoreCase = true)) return original
-        val scheme = original.scheme.lowercase(Locale.ROOT)
-        val defaultPort = if (scheme == "https") 443 else 80
-        val protoSeg = if (original.port == defaultPort) scheme else "$scheme-${original.port}"
-        val encHost = encryptHost(original.host)
-        val querySuffix = original.encodedQuery?.let { "?$it" }.orEmpty()
-        val fragmentSuffix = original.encodedFragment?.let { "#$it" }.orEmpty()
-        return "$VPN_BASE/$protoSeg/$encHost${original.encodedPath}$querySuffix$fragmentSuffix".toHttpUrl()
+        // 共享编解码负责改写规则；这里保留 OkHttp 的编码语义（path/query/fragment 原样透传）。
+        return WebVpnCodec.toVpnUrl(original.toString()).toHttpUrlOrNull() ?: original
     }
 
     fun fromVpnUrl(vpnUrl: HttpUrl): HttpUrl? {
         if (!vpnUrl.host.equals(VPN_HOST, ignoreCase = true)) return null
-        val path = vpnUrl.encodedPath
-        if (!path.startsWith("/")) return null
-        val trimmed = path.substring(1)
-        val firstSlash = trimmed.indexOf('/')
-        if (firstSlash <= 0) return null
-        val protoSeg = trimmed.substring(0, firstSlash).lowercase(Locale.ROOT)
-        val restAfterProto = trimmed.substring(firstSlash + 1)
-        val secondSlash = restAfterProto.indexOf('/')
-        val encHost = if (secondSlash < 0) restAfterProto else restAfterProto.substring(0, secondSlash)
-        val restPath = if (secondSlash < 0) "/" else restAfterProto.substring(secondSlash)
-
-        val scheme: String
-        val port: Int?
-        when {
-            protoSeg == "http" -> {
-                scheme = "http"
-                port = null
-            }
-            protoSeg == "https" -> {
-                scheme = "https"
-                port = null
-            }
-            protoSeg.startsWith("http-") -> {
-                scheme = "http"
-                port = protoSeg.removePrefix("http-").toIntOrNull() ?: return null
-            }
-            protoSeg.startsWith("https-") -> {
-                scheme = "https"
-                port = protoSeg.removePrefix("https-").toIntOrNull() ?: return null
-            }
-            else -> return null
-        }
-        if (port != null && port !in 1..65535) return null
-        val host = decryptHost(encHost) ?: return null
-
-        return runCatching {
-            HttpUrl.Builder()
-                .scheme(scheme)
-                .host(host)
-                .apply { if (port != null) port(port) }
-                .encodedPath(restPath)
-                .encodedQuery(vpnUrl.encodedQuery)
-                .encodedFragment(vpnUrl.encodedFragment)
-                .build()
-        }.getOrNull()
+        // 共享编解码负责解析；解出的原始 URL 再交回 OkHttp 保证编码语义一致
+        return WebVpnCodec.fromVpnUrl(vpnUrl.toString())?.toHttpUrlOrNull()
     }
 
     fun isVpnLoginRedirect(response: Response): Boolean {
@@ -819,35 +746,6 @@ object BuctWebVpn {
         return latest
     }
 
-    private fun toLowerHex(bytes: ByteArray): String {
-        val chars = CharArray(bytes.size * 2)
-        val hexChars = "0123456789abcdef"
-        for (i in bytes.indices) {
-            val v = bytes[i].toInt() and 0xFF
-            chars[i * 2] = hexChars[v ushr 4]
-            chars[i * 2 + 1] = hexChars[v and 0x0F]
-        }
-        return String(chars)
-    }
-
-    private fun hexToBytes(hex: String): ByteArray? {
-        if (hex.length % 2 != 0) return null
-        val out = ByteArray(hex.length / 2)
-        for (i in out.indices) {
-            val hi = hexDigit(hex[i * 2])
-            val lo = hexDigit(hex[i * 2 + 1])
-            if (hi < 0 || lo < 0) return null
-            out[i] = ((hi shl 4) or lo).toByte()
-        }
-        return out
-    }
-
-    private fun hexDigit(c: Char): Int = when (c) {
-        in '0'..'9' -> c - '0'
-        in 'a'..'f' -> c - 'a' + 10
-        in 'A'..'F' -> c - 'A' + 10
-        else -> -1
-    }
 }
 
 /**

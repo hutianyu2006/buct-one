@@ -8,7 +8,9 @@ import io.ktor.client.HttpClient
 import io.ktor.client.request.forms.submitForm
 import io.ktor.client.request.get
 import io.ktor.client.request.header
+import io.ktor.client.statement.bodyAsBytes
 import io.ktor.client.statement.bodyAsText
+import kotlinx.coroutines.CancellationException
 import io.ktor.http.HttpHeaders
 import io.ktor.http.Parameters
 
@@ -86,6 +88,37 @@ class CasPasswordLoginClient(
         return classify(response.bodyAsText())
     }
 
+    /**
+     * 拉取图形验证码 PNG（GET /api/captcha/generate/DEFAULT）。
+     *
+     * **必须复用同一个 [httpClient]**：验证码的校验凭据是服务端种在该会话上的 Cookie，
+     * 换客户端（或换 Cookie 存储）会导致随后提交的 `captcha_code` 永远判错。
+     *
+     * @return PNG 字节；网络异常或响应异常时返回 null（UI 提示"刷新验证码"）。
+     */
+    suspend fun fetchCaptchaPng(): ByteArray? {
+        val response = try {
+            httpClient.get("$portalBaseUrl/api/captcha/generate/DEFAULT") {
+                header(HttpHeaders.UserAgent, userAgent)
+                header(HttpHeaders.Accept, "image/avif,image/webp,image/png,image/*,*/*;q=0.8")
+                header(HttpHeaders.Referrer, "$portalBaseUrl/login")
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            return null
+        }
+        if (response.status.value !in 200..299) return null
+        val bytes = try {
+            response.bodyAsBytes()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            return null
+        }
+        return bytes.takeIf { it.size > MIN_CAPTCHA_BYTES }
+    }
+
     /** 登录成功后跟随 CAS 票据跳转到业务系统（仅限 *.buct.edu.cn，且强制 https）。 */
     private suspend fun followSessionRedirects(initialLocation: String?) {
         var current: String = resolveUrl(portalBaseUrl, initialLocation ?: return)
@@ -145,5 +178,8 @@ class CasPasswordLoginClient(
     companion object {
         const val DEFAULT_PORTAL = "https://sidportal.buct.edu.cn"
         const val DEFAULT_SERVICE = "https://jwglxt.buct.edu.cn/sso/jziotlogin"
+
+        /** 小于这个字节数的响应视为无效图片（错误页/空响应），与 Android 端判定一致。 */
+        private const val MIN_CAPTCHA_BYTES = 16
     }
 }

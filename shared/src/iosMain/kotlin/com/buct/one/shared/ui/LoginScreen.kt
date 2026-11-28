@@ -1,7 +1,9 @@
 package com.buct.one.shared.ui
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -10,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -22,6 +25,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.toComposeImageBitmap
+import org.jetbrains.skia.Image as SkiaImage
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -32,11 +38,13 @@ import com.buct.one.data.login.LoginState
 @Composable
 internal fun LoginScreen(
     state: LoginState,
-    onSubmit: (String, String) -> Unit,
+    onSubmit: (String, String, String) -> Unit,
     onSkip: () -> Unit,
     onRequestSmsCaptcha: (String) -> Unit = {},
     onSendSmsCode: (String, String) -> Unit = { _, _ -> },
     onSmsLogin: (String, String) -> Unit = { _, _ -> },
+    rememberPassword: Boolean = false,
+    onRememberPasswordChange: (Boolean) -> Unit = {},
 ) {
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
@@ -47,6 +55,7 @@ internal fun LoginScreen(
     val colors = MaterialTheme.colorScheme
     val smsCaptcha = state as? LoginState.SmsCaptchaRequired
     val smsSent = state is LoginState.SmsCodeSent
+    val passwordCaptcha = state as? LoginState.CaptchaRequired
 
     Column(
         modifier = Modifier
@@ -89,6 +98,31 @@ internal fun LoginScreen(
                 visualTransformation = PasswordVisualTransformation(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
             )
+            if (passwordCaptcha != null) {
+                Spacer(Modifier.height(12.dp))
+                // 验证码图片由共享 CasPasswordLoginClient 用同一 Cookie 会话拉取，这里只负责解码渲染
+                val bitmap = remember(passwordCaptcha.pngBytes) {
+                    decodeCaptchaBitmap(passwordCaptcha.pngBytes)
+                }
+                if (bitmap != null) {
+                    Image(
+                        bitmap = bitmap,
+                        contentDescription = "图形验证码",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(64.dp),
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = captchaCode,
+                    onValueChange = { captchaCode = it },
+                    label = { Text(if (passwordCaptcha.wrongCode) "验证码错误，请重新输入" else "图形验证码") },
+                    singleLine = true,
+                    enabled = !loading,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
         } else {
             Spacer(Modifier.height(12.dp))
             OutlinedTextField(
@@ -101,12 +135,22 @@ internal fun LoginScreen(
             )
             if (smsCaptcha != null && smsCaptcha.pngBytes.isNotEmpty()) {
                 Spacer(Modifier.height(8.dp))
-                Text(
-                    text = "已获取图形验证码（${smsCaptcha.pngBytes.size} 字节 PNG）；" +
-                        "iOS 预览版暂未内置图片解码，请先点「发送短信」再按提示输入短信码。",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = colors.onSurfaceVariant,
-                )
+                val bitmap = remember(smsCaptcha.pngBytes) { decodeCaptchaBitmap(smsCaptcha.pngBytes) }
+                if (bitmap != null) {
+                    Image(
+                        bitmap = bitmap,
+                        contentDescription = "图形验证码",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(64.dp),
+                    )
+                } else {
+                    Text(
+                        text = "图形验证码获取失败，请点击下方按钮重试",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = colors.onSurfaceVariant,
+                    )
+                }
             }
             Spacer(Modifier.height(12.dp))
             OutlinedTextField(
@@ -119,6 +163,29 @@ internal fun LoginScreen(
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             )
         }
+        Spacer(Modifier.height(8.dp))
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Checkbox(
+                checked = rememberPassword,
+                onCheckedChange = onRememberPasswordChange,
+                enabled = !loading && !smsMode,
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "记住密码（仅本机钥匙串，不进 iCloud 备份）",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.onSurfaceVariant,
+                )
+                Text(
+                    text = "开启后会话过期可自动续期，退出登录立即擦除",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = colors.onSurfaceVariant,
+                )
+            }
+        }
         Spacer(Modifier.height(16.dp))
 
         Button(
@@ -130,12 +197,16 @@ internal fun LoginScreen(
                         onSendSmsCode(username.trim(), captchaCode)
                     }
                 } else {
-                    onSubmit(username.trim(), password)
+                    onSubmit(username.trim(), password, if (passwordCaptcha != null) captchaCode else "")
                 }
             },
             enabled = !loading && username.isNotBlank() &&
-                if (smsMode) (if (smsSent) smsCode.isNotBlank() else captchaCode.isNotBlank())
-                else password.isNotBlank(),
+                when {
+                    smsMode && smsSent -> smsCode.isNotBlank()
+                    smsMode -> captchaCode.isNotBlank()
+                    passwordCaptcha != null -> password.isNotBlank() && captchaCode.isNotBlank()
+                    else -> password.isNotBlank()
+                },
             modifier = Modifier.fillMaxWidth(),
         ) {
             if (loading) {
@@ -176,12 +247,12 @@ internal fun LoginScreen(
                 color = colors.error,
             )
             is LoginState.CaptchaRequired -> Text(
-                text = "统一认证要求图形验证码（${state.message}）。当前 iOS 预览版暂未内置验证码图片，请在 Android 端完成登录。",
+                text = state.message,
                 style = MaterialTheme.typography.bodySmall,
                 color = WarningOrange,
             )
             is LoginState.SmsRequired -> Text(
-                text = "已触发短信二次验证（${state.phoneMask}），iOS 预览版暂未支持短信验证。",
+                text = "已触发短信二次验证（${state.phoneMask}），请改用「短信验证码登录」完成验证。",
                 style = MaterialTheme.typography.bodySmall,
                 color = WarningOrange,
             )
@@ -193,4 +264,12 @@ internal fun LoginScreen(
             Text("跳过，先看公告")
         }
     }
+}
+/** 把共享层下发的 PNG 字节解码成 Compose 位图；解码失败（空/损坏）返回 null，界面自动隐藏图片。 */
+private fun decodeCaptchaBitmap(bytes: ByteArray): ImageBitmap? {
+    if (bytes.isEmpty()) return null
+    // 全限定名：foundation 的 Image 组合函数与本类的图形 Image 同名，避免歧义
+    return runCatching {
+        SkiaImage.makeFromEncoded(bytes).toComposeImageBitmap()
+    }.getOrNull()
 }

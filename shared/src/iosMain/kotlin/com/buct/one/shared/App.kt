@@ -34,9 +34,16 @@ import com.buct.one.data.store.ElectricitySnapshotStore
 import com.buct.one.data.store.JwNoticeSnapshotStore
 import com.buct.one.data.source.jwnotice.JwNoticeController
 import com.buct.one.data.source.jwnotice.JwNoticeGateway
+import com.buct.one.data.sync.ReloginWrapper
+import com.buct.one.data.sync.SsoReloginRunner
+import com.buct.one.platform.IosAppConfig
+import com.buct.one.platform.IosCredentialStore
 import com.buct.one.platform.UserDefaultsKeyValueStore
 import com.buct.one.platform.clearIosSessionCookies
+import com.buct.one.platform.createIosReloginCoordinator
 import com.buct.one.platform.createIosSessionClient
+import com.buct.one.platform.iosSecureVault
+import com.buct.one.platform.reloginWithSavedCredentials
 import com.buct.one.shared.notice.AppNotice
 import com.buct.one.shared.notice.NoticeRepository
 import com.buct.one.shared.ui.BuctOneTheme
@@ -68,27 +75,44 @@ fun App() {
         }
 
         val sessionClient = remember { createIosSessionClient() }
+        val passwordClient = remember {
+            CasPasswordLoginClient(httpClient = sessionClient, userAgent = iosUserAgent())
+        }
         val loginController = remember {
             CasLoginController(
-                loginClient = CasPasswordLoginClient(httpClient = sessionClient, userAgent = iosUserAgent()),
+                loginClient = passwordClient,
                 smsClient = CasSmsLoginClient(httpClient = sessionClient, userAgent = iosUserAgent()),
             )
         }
+        val reloginCoordinator = remember { createIosReloginCoordinator() }
+        // 会话过期时自动用 Keychain 里的密码续期一次，失败才把「会话已失效」交给界面
+        val reloginRunner = remember {
+            SsoReloginRunner(reloginCoordinator) { username, passwordChars ->
+                reloginWithSavedCredentials(passwordClient, username, passwordChars)
+            }
+        }
+
         val cacheStore = remember { UserDefaultsKeyValueStore() }
         val jwController = remember {
             JwNoticeController(
                 gateway = JwNoticeGateway(httpClient = sessionClient, userAgent = iosUserAgent()),
                 cache = JwNoticeSnapshotStore(cacheStore),
+                // 会话过期先尝试用 Keychain 里的密码自动续期，失败才提示重新登录
+                withRelogin = ReloginWrapper { block -> reloginRunner.run { block() } },
             )
         }
         val campusNetController = remember {
             CampusNetController(
                 gateway = CampusNetGateway(httpClient = sessionClient, userAgent = iosUserAgent()),
                 cache = CampusNetSnapshotStore(cacheStore),
+                withRelogin = ReloginWrapper { block -> reloginRunner.run { block() } },
             )
         }
         val tyglController = remember {
-            TyglController(TyglGateway(httpClient = sessionClient, userAgent = iosUserAgent()))
+            TyglController(
+                gateway = TyglGateway(httpClient = sessionClient, userAgent = iosUserAgent()),
+                withRelogin = ReloginWrapper { block -> reloginRunner.run { block() } },
+            )
         }
         val electricityController = remember {
             ElectricityController(
@@ -111,6 +135,7 @@ fun App() {
         var reloadKey by remember { mutableStateOf(0) }
         var selected by remember { mutableStateOf<AppNotice?>(null) }
         var skippedLogin by remember { mutableStateOf(false) }
+        var rememberPassword by remember { mutableStateOf(IosCredentialStore.hasSaved(iosSecureVault)) }
         var section by remember { mutableStateOf(HomeSection.Notices) }
         val loggedInUsername = (loginState as? LoginState.Success)?.username
 
@@ -209,7 +234,8 @@ fun App() {
                                                 targets = electricityController.targets(),
                                                 clientId = "buct-one-ios",
                                                 studentId = loggedInUsername,
-                                                signSecret = "",
+                                                // 构建期从 Info.plist 注入；未配置时为空串（查询失败但不崩溃）
+                                                signSecret = IosAppConfig.electricitySignSecret,
                                             )
                                         }
                                     },
@@ -231,6 +257,10 @@ fun App() {
                                         loginController.reset()
                                         jwController.reset()
                                         clearIosSessionCookies()
+                                        // 退出登录立即擦除 Keychain 里的「记住密码」与重登冷却状态
+                                        IosCredentialStore.clear(iosSecureVault)
+                                        reloginCoordinator.resetCooldown()
+                                        rememberPassword = false
                                         section = HomeSection.Notices
                                         skippedLogin = false
                                     },
@@ -239,9 +269,22 @@ fun App() {
                         }
                         else -> LoginScreen(
                             state = loginState,
-                            onSubmit = { username, password ->
-                                scope.launch { loginController.login(username, password) }
+                            onSubmit = { username, password, captchaCode ->
+                                scope.launch {
+                                    loginController.login(username, password, captchaCode)
+                                    if (loginController.state.value is LoginState.Success) {
+                                        if (rememberPassword) {
+                                            // 只在登录成功后落 Keychain；失败绝不留存密码
+                                            IosCredentialStore.save(iosSecureVault, username, password.toCharArray())
+                                        } else {
+                                            IosCredentialStore.clear(iosSecureVault)
+                                        }
+                                        reloginCoordinator.resetCooldown()
+                                    }
+                                }
                             },
+                            rememberPassword = rememberPassword,
+                            onRememberPasswordChange = { rememberPassword = it },
                             onSkip = { skippedLogin = true },
                             onRequestSmsCaptcha = { username ->
                                 scope.launch { loginController.requestSmsCaptcha(username) }

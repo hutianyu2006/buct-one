@@ -3,6 +3,7 @@ package com.buct.one.data.source.tygl
 import com.buct.one.data.model.Provenance
 import com.buct.one.data.model.TyglSnapshot
 import com.buct.one.data.sync.DomainSync
+import com.buct.one.data.sync.ReloginWrapper
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -24,6 +25,8 @@ sealed interface TyglUiState {
 class TyglController(
     private val gateway: TyglGateway,
     parserVersion: Int = TyglParser.PARSER_VERSION,
+    /** 会话失效时的静默重登包装（可选），语义与 [com.buct.one.data.source.jwnotice.JwNoticeController] 一致。 */
+    private val withRelogin: ReloginWrapper<TyglSnapshot> = ReloginWrapper.passthrough(),
 ) {
 
     private val sync = DomainSync<TyglSnapshot>(
@@ -42,7 +45,7 @@ class TyglController(
     suspend fun refresh() {
         _state.value = TyglUiState.Loading
         _state.value = try {
-            val snapshot = gateway.fetchFullSnapshot()
+            val snapshot = withRelogin.fetch { gateway.fetchFullSnapshot() }
             val slice = sync.commitSuccess(snapshot)
             TyglUiState.Loaded(snapshot, slice.provenance)
         } catch (expired: TyglAuthExpiredException) {
