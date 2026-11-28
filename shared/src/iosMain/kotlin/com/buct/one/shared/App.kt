@@ -34,6 +34,9 @@ import com.buct.one.data.store.ElectricitySnapshotStore
 import com.buct.one.data.store.JwNoticeSnapshotStore
 import com.buct.one.data.source.jwnotice.JwNoticeController
 import com.buct.one.data.source.jwnotice.JwNoticeGateway
+import com.buct.one.data.source.scs.ScsController
+import com.buct.one.data.source.scs.ScsGateway
+import com.buct.one.data.store.ScsSnapshotStore
 import com.buct.one.data.sync.ReloginWrapper
 import com.buct.one.data.sync.SsoReloginRunner
 import com.buct.one.platform.IosAppConfig
@@ -53,6 +56,7 @@ import com.buct.one.shared.ui.TyglScreen
 import com.buct.one.shared.ui.HomeScreen
 import com.buct.one.shared.ui.JwNoticeScreen
 import com.buct.one.shared.ui.LoginScreen
+import com.buct.one.shared.ui.ScsScreen
 import com.buct.one.shared.ui.NoticeDetailScreen
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
@@ -63,7 +67,7 @@ internal sealed interface NoticeUiState {
     data class Failed(val message: String) : NoticeUiState
 }
 
-private enum class HomeSection { Notices, JwNotices, CampusNet, Electricity, Tygl }
+private enum class HomeSection { Notices, JwNotices, Scs, CampusNet, Electricity, Tygl }
 
 /** iOS 端的 Compose 根节点，被 MainViewController 直接嵌入 UIViewController。 */
 @Composable
@@ -114,6 +118,13 @@ fun App() {
                 withRelogin = ReloginWrapper { block -> reloginRunner.run { block() } },
             )
         }
+        val scsController = remember {
+            ScsController(
+                gateway = ScsGateway(httpClient = sessionClient, userAgent = iosUserAgent(), deviceId = "buct-one-ios"),
+                cache = ScsSnapshotStore(cacheStore),
+                withRelogin = ReloginWrapper { block -> reloginRunner.run { block() } },
+            )
+        }
         val electricityController = remember {
             ElectricityController(
                 gateway = ElectricityGatewayClient(
@@ -130,6 +141,7 @@ fun App() {
         val campusNetState by campusNetController.state.collectAsState()
         val electricityState by electricityController.state.collectAsState()
         val tyglState by tyglController.state.collectAsState()
+        val scsState by scsController.state.collectAsState()
 
         var state by remember { mutableStateOf<NoticeUiState>(NoticeUiState.Loading) }
         var reloadKey by remember { mutableStateOf(0) }
@@ -165,6 +177,10 @@ fun App() {
                     if (electricityController.targets().isEmpty()) electricityController.loadCatalog()
                 }
                 section == HomeSection.Tygl && loggedInUsername != null -> tyglController.refresh()
+                section == HomeSection.Scs && loggedInUsername != null -> {
+                    if (scsController.lastSnapshot() == null) scsController.restoreFromCache()
+                    scsController.refresh()
+                }
             }
         }
 
@@ -188,6 +204,11 @@ fun App() {
                             selected = section == HomeSection.JwNotices,
                             onClick = { section = HomeSection.JwNotices },
                             text = { Text("教务消息") },
+                        )
+                        Tab(
+                            selected = section == HomeSection.Scs,
+                            onClick = { section = HomeSection.Scs },
+                            text = { Text("第二课堂") },
                         )
                         Tab(
                             selected = section == HomeSection.CampusNet,
@@ -217,6 +238,12 @@ fun App() {
                                     state = jwState,
                                     onRefresh = { scope.launch { jwController.refresh() } },
                                     loadDetail = { item -> jwController.fetchDetail(item) },
+                                )
+                            } else if (section == HomeSection.Scs && loggedInUsername != null) {
+                                ScsScreen(
+                                    state = scsState,
+                                    onRefresh = { scope.launch { scsController.refresh() } },
+                                    onBack = { section = HomeSection.Notices },
                                 )
                             } else if (section == HomeSection.CampusNet && loggedInUsername != null) {
                                 CampusNetScreen(
@@ -256,6 +283,7 @@ fun App() {
                                     onLogout = {
                                         loginController.reset()
                                         jwController.reset()
+                                        scsController.reset()
                                         clearIosSessionCookies()
                                         // 退出登录立即擦除 Keychain 里的「记住密码」与重登冷却状态
                                         IosCredentialStore.clear(iosSecureVault)
