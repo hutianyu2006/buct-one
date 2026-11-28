@@ -7,7 +7,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
+import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -19,6 +19,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import com.buct.one.data.login.CasLoginController
 import com.buct.one.data.login.CasPasswordLoginClient
 import com.buct.one.data.login.CasSmsLoginClient
@@ -34,8 +35,11 @@ import com.buct.one.data.store.ElectricitySnapshotStore
 import com.buct.one.data.store.JwNoticeSnapshotStore
 import com.buct.one.data.source.jwnotice.JwNoticeController
 import com.buct.one.data.source.jwnotice.JwNoticeGateway
+import com.buct.one.data.source.portal.PortalController
+import com.buct.one.data.source.portal.PortalGateway
 import com.buct.one.data.source.scs.ScsController
 import com.buct.one.data.source.scs.ScsGateway
+import com.buct.one.data.store.PortalSnapshotStore
 import com.buct.one.data.store.ScsSnapshotStore
 import com.buct.one.data.sync.ReloginWrapper
 import com.buct.one.data.sync.SsoReloginRunner
@@ -45,6 +49,7 @@ import com.buct.one.platform.UserDefaultsKeyValueStore
 import com.buct.one.platform.clearIosSessionCookies
 import com.buct.one.platform.createIosReloginCoordinator
 import com.buct.one.platform.createIosSessionClient
+import com.buct.one.platform.createIosWebVpnExecutor
 import com.buct.one.platform.iosSecureVault
 import com.buct.one.platform.reloginWithSavedCredentials
 import com.buct.one.shared.notice.AppNotice
@@ -56,6 +61,7 @@ import com.buct.one.shared.ui.TyglScreen
 import com.buct.one.shared.ui.HomeScreen
 import com.buct.one.shared.ui.JwNoticeScreen
 import com.buct.one.shared.ui.LoginScreen
+import com.buct.one.shared.ui.PortalScreen
 import com.buct.one.shared.ui.ScsScreen
 import com.buct.one.shared.ui.NoticeDetailScreen
 import kotlinx.coroutines.CancellationException
@@ -67,7 +73,7 @@ internal sealed interface NoticeUiState {
     data class Failed(val message: String) : NoticeUiState
 }
 
-private enum class HomeSection { Notices, JwNotices, Scs, CampusNet, Electricity, Tygl }
+private enum class HomeSection { Notices, JwNotices, Scs, CampusNet, Electricity, Tygl, Portal }
 
 /** iOS 端的 Compose 根节点，被 MainViewController 直接嵌入 UIViewController。 */
 @Composable
@@ -135,6 +141,19 @@ fun App() {
                 cache = ElectricitySnapshotStore(cacheStore),
             )
         }
+        // 校外访问：i.buct.edu.cn / mnews.buct.edu.cn 都走「直连优先 → 403 转 WebVPN 代理」
+        val webVpnExecutor = remember { createIosWebVpnExecutor(sessionClient) }
+        val portalController = remember {
+            PortalController(
+                gateway = PortalGateway(
+                    httpClient = sessionClient,
+                    userAgent = iosUserAgent(),
+                    vpn = webVpnExecutor,
+                ),
+                cache = PortalSnapshotStore(cacheStore),
+                withRelogin = ReloginWrapper { block -> reloginRunner.run { block() } },
+            )
+        }
         val scope = rememberCoroutineScope()
         val loginState by loginController.state.collectAsState()
         val jwState by jwController.state.collectAsState()
@@ -142,6 +161,7 @@ fun App() {
         val electricityState by electricityController.state.collectAsState()
         val tyglState by tyglController.state.collectAsState()
         val scsState by scsController.state.collectAsState()
+        val portalState by portalController.state.collectAsState()
 
         var state by remember { mutableStateOf<NoticeUiState>(NoticeUiState.Loading) }
         var reloadKey by remember { mutableStateOf(0) }
@@ -181,6 +201,10 @@ fun App() {
                     if (scsController.lastSnapshot() == null) scsController.restoreFromCache()
                     scsController.refresh()
                 }
+                section == HomeSection.Portal && loggedInUsername != null -> {
+                    portalController.restoreFromCache()
+                    portalController.refresh()
+                }
             }
         }
 
@@ -191,9 +215,10 @@ fun App() {
                     .padding(innerPadding),
             ) {
                 if (loggedInUsername != null) {
-                    TabRow(
+                    ScrollableTabRow(
                         selectedTabIndex = section.ordinal,
                         containerColor = MaterialTheme.colorScheme.background,
+                        edgePadding = 8.dp,
                     ) {
                         Tab(
                             selected = section == HomeSection.Notices,
@@ -224,6 +249,11 @@ fun App() {
                             selected = section == HomeSection.Tygl,
                             onClick = { section = HomeSection.Tygl },
                             text = { Text("体测") },
+                        )
+                        Tab(
+                            selected = section == HomeSection.Portal,
+                            onClick = { section = HomeSection.Portal },
+                            text = { Text("i北化") },
                         )
                     }
                 }
@@ -274,6 +304,12 @@ fun App() {
                                     onRefresh = { scope.launch { tyglController.refresh() } },
                                     onBack = { section = HomeSection.Notices },
                                 )
+                            } else if (section == HomeSection.Portal && loggedInUsername != null) {
+                                PortalScreen(
+                                    state = portalState,
+                                    onRefresh = { scope.launch { portalController.refresh() } },
+                                    onBack = { section = HomeSection.Notices },
+                                )
                             } else {
                                 HomeScreen(
                                     state = state,
@@ -284,6 +320,7 @@ fun App() {
                                         loginController.reset()
                                         jwController.reset()
                                         scsController.reset()
+                                        portalController.reset()
                                         clearIosSessionCookies()
                                         // 退出登录立即擦除 Keychain 里的「记住密码」与重登冷却状态
                                         IosCredentialStore.clear(iosSecureVault)
