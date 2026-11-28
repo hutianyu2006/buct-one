@@ -1,5 +1,6 @@
 package com.buct.one.data.source.scs
 
+import com.buct.course.login.AndroidHttpClients
 import com.buct.course.login.BuctAesCrypto
 import com.buct.course.login.BuctDns
 import com.buct.course.login.BuctTlsTrustManager
@@ -9,16 +10,14 @@ import com.buct.course.login.BuctWebVpnInterceptor
 import com.buct.course.login.BuctWebVpnNetworkInterceptor
 import com.buct.course.login.MatchingMemoryCookieJar
 import com.buct.one.data.model.ScsSnapshot
-import com.buct.one.data.model.ScsTermScore
+import com.buct.one.data.source.scs.ScsAuthExpiredException
+import com.buct.one.data.source.scs.ScsGateway
 import okhttp3.Cookie
 import okhttp3.FormBody
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
-import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
-import org.json.JSONObject
 import org.jsoup.Jsoup
 import java.io.IOException
 import java.net.ConnectException
@@ -70,7 +69,6 @@ class ScsClient {
         private const val DEVICE_ID = "buct-one-android"
         private const val UA =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
-        private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
     }
 
     fun importSidPortalCookies(rawCookieHeader: String) {
@@ -342,158 +340,24 @@ class ScsClient {
         return url.queryParameter("ticket")?.trim().orEmpty()
     }
 
-    private fun ensureTokenReady() {
-        if (!hasActiveToken() && !authenticateWithSso()) {
-            throw IOException("第二课堂会话已过期，请重新登录")
-        }
-    }
-
-    private class ScsTokenExpiredException(msg: String) : IOException(msg)
-
-    private fun executeApiGet(path: String): String {
-        ensureTokenReady()
-        return try {
-            doApiGet(path)
-        } catch (_: ScsTokenExpiredException) {
+    /**
+     * 拉取第二课堂完整快照（个人信息、自评窗口、五育维度满分、历年各学期明细、历史记录、校园二课活动）。
+     *
+     * 请求编排与解析全部复用共享 `ScsGateway`（与 iOS 同一份实现）；
+     * OkHttp 的 cookieJar 仍是登录/换票的事实来源，调用前把会话 Cookie 种进共享 CookieStore。
+     */
+    suspend fun fetchFullSnapshot(): ScsSnapshot = runCampusCall {
+        AndroidHttpClients.seedCookies("sidportal.buct.edu.cn", exportSidPortalCookieHeader())
+        AndroidHttpClients.seedCookies("scs.buct.edu.cn", cookieHeaderFor("https://scs.buct.edu.cn/"))
+        AndroidHttpClients.seedCookies("eapi.buct.edu.cn", cookieHeaderFor("$SCS_API_BASE/"))
+        val gateway = ScsGateway(AndroidHttpClients.session, userAgent = UA, deviceId = DEVICE_ID)
+        try {
+            gateway.fetchFullSnapshot()
+        } catch (expired: ScsAuthExpiredException) {
             appToken = ""
-            if (!authenticateWithSso()) throw IOException("第二课堂会话已过期，请重新登录")
-            doApiGet(path)
+            throw IOException(expired.message ?: "第二课堂会话已过期，请重新登录")
         }
     }
 
-    private fun doApiGet(path: String): String {
-        val req = Request.Builder()
-            .url("$SCS_API_BASE$path")
-            .header("User-Agent", UA)
-            .header("App-Token", appToken)
-            .header("App-source", APP_SOURCE)
-            .header("App-Version", APP_VERSION)
-            .header("Device-Id", DEVICE_ID)
-            .get()
-            .build()
-        return httpClient.newCall(req).execute().use { resp ->
-            val body = resp.body?.string().orEmpty()
-            if (resp.code == 401 || resp.code == 403) {
-                throw ScsTokenExpiredException("HTTP ${resp.code}")
-            }
-            if (!resp.isSuccessful) {
-                throw IOException("第二课堂接口请求失败（HTTP ${resp.code}）")
-            }
-            val code = runCatching { JSONObject(body).optInt("code", 200) }.getOrDefault(200)
-            val msg = runCatching { JSONObject(body).optString("message", "") }.getOrDefault("")
-            if (ScsParser.isUnauthorized(code, msg)) {
-                throw ScsTokenExpiredException(msg.ifBlank { "认证失效" })
-            }
-            body
-        }
-    }
-
-    private fun executeApiPost(path: String, jsonBody: JSONObject = JSONObject()): String {
-        ensureTokenReady()
-        return try {
-            doApiPost(path, jsonBody)
-        } catch (_: ScsTokenExpiredException) {
-            appToken = ""
-            if (!authenticateWithSso()) throw IOException("第二课堂会话已过期，请重新登录")
-            doApiPost(path, jsonBody)
-        }
-    }
-
-    private fun doApiPost(path: String, jsonBody: JSONObject): String {
-        val body = jsonBody.toString().toRequestBody(JSON_MEDIA_TYPE)
-        val req = Request.Builder()
-            .url("$SCS_API_BASE$path")
-            .header("User-Agent", UA)
-            .header("App-Token", appToken)
-            .header("App-source", APP_SOURCE)
-            .header("App-Version", APP_VERSION)
-            .header("Device-Id", DEVICE_ID)
-            .header("Content-Type", "application/json; charset=utf-8")
-            .post(body)
-            .build()
-        return httpClient.newCall(req).execute().use { resp ->
-            val respBody = resp.body?.string().orEmpty()
-            if (resp.code == 401 || resp.code == 403) {
-                throw ScsTokenExpiredException("HTTP ${resp.code}")
-            }
-            if (!resp.isSuccessful) {
-                throw IOException("第二课堂接口请求失败（HTTP ${resp.code}）")
-            }
-            val code = runCatching { JSONObject(respBody).optInt("code", 200) }.getOrDefault(200)
-            val msg = runCatching { JSONObject(respBody).optString("message", "") }.getOrDefault("")
-            if (ScsParser.isUnauthorized(code, msg)) {
-                throw ScsTokenExpiredException(msg.ifBlank { "认证失效" })
-            }
-            respBody
-        }
-    }
-
-    /** 拉取第二课堂完整快照（个人信息、自评窗口、五育维度满分、历年各学期明细、历史记录、校园二课活动） */
-    fun fetchFullSnapshot(): ScsSnapshot = runCampusCall {
-        val userJson = executeApiGet("/sysAccount/getLoginUserInfo")
-        val userInfo = ScsParser.parseUserInfo(userJson)
-
-        val windowJson = runCatching { executeApiGet("/scSelfEvalTerm/getDefaultYearAndTerm") }.getOrDefault("")
-        val currentWindow = if (windowJson.isNotBlank()) ScsParser.parseCurrentEvalWindow(windowJson) else null
-
-        val dimensionsJson = runCatching { executeApiGet("/scStudentEvaluationType/getEvaluationType") }.getOrDefault("")
-        val dimensions = if (dimensionsJson.isNotBlank()) ScsParser.parseEvaluationDimensions(dimensionsJson) else emptyList()
-
-        val allScoreJson = executeApiGet("/tStudent/getLoginStudentAllScore")
-        var terms = ScsParser.parseAllTermsScores(allScoreJson)
-
-        // 若当前自评开放中且当前学期暂无五育明细，拉取当前学期的自评评定细则以便展示自评表结构
-        if (currentWindow != null) {
-            val idx = terms.indexOfFirst { it.termId == currentWindow.termId && it.yearId == currentWindow.yearId }
-            if (idx >= 0 && terms[idx].details.isEmpty()) {
-                val evalItemsJson = runCatching {
-                    executeApiPost(
-                        "/scStudentEvaluationItem/getAppointTermEvaluationItems",
-                        JSONObject().put("yearId", currentWindow.yearId).put("termId", currentWindow.termId)
-                    )
-                }.getOrDefault("")
-                if (evalItemsJson.isNotBlank()) {
-                    val parsedDetails = ScsParser.parseCurrentTermEvalDetails(evalItemsJson)
-                    if (parsedDetails.isNotEmpty()) {
-                        val mutable = terms.toMutableList()
-                        val old = mutable[idx]
-                        mutable[idx] = old.copy(
-                            isOpenSelfEva = currentWindow.isOpen || old.isOpenSelfEva,
-                            details = parsedDetails
-                        )
-                        terms = mutable
-                    }
-                }
-            }
-        }
-
-        val classInfo = if (userInfo.studentId.isNotBlank()) {
-            val histJson = runCatching {
-                executeApiPost(
-                    "/scStudentScore/listStudentHistoryScore?xh=${URLEncoder.encode(userInfo.studentId, "UTF-8")}",
-                    JSONObject()
-                )
-            }.getOrDefault("")
-            if (histJson.isNotBlank()) ScsParser.parseStudentClassInfo(histJson) else ScsParser.StudentClassInfo("", "", "")
-        } else {
-            ScsParser.StudentClassInfo("", "", "")
-        }
-
-        val actsJson = runCatching {
-            executeApiPost("/scActivity/listByCondition?currentPage=1&pageSize=30", JSONObject())
-        }.getOrDefault("")
-        val activities = if (actsJson.isNotBlank()) ScsParser.parseActivities(actsJson) else emptyList()
-
-        return@runCampusCall ScsSnapshot(
-            studentName = userInfo.name,
-            studentId = userInfo.studentId,
-            collegeName = classInfo.collegeName,
-            className = classInfo.className,
-            gradeName = classInfo.gradeName,
-            currentWindow = currentWindow,
-            dimensions = dimensions,
-            terms = terms,
-            activities = activities
-        )
-    }
+    private fun cookieHeaderFor(url: String): String = cookieJar.cookieHeaderFor(url.toHttpUrl())
 }
