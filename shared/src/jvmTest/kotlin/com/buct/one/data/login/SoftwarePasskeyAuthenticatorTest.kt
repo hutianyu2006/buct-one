@@ -178,29 +178,31 @@ class SoftwarePasskeyAuthenticatorTest {
         var x: ByteArray? = null
         var y: ByteArray? = null
         var offset = 0
-        fun readInt(): Int {
+        val entryCount = (cose[0].toInt() and 0x1F).also { offset = 1 }
+
+        fun readValue(): Any {
             val initial = cose[offset].toInt() and 0xFF
             offset++
             val major = initial shr 5
             val additional = initial and 0x1F
-            val value = if (additional < 24) additional else (cose[offset++].toInt() and 0xFF)
-            return if (major == 1) -1 - value else value
+            val length = when {
+                additional < 24 -> additional
+                additional == 24 -> cose[offset++].toInt() and 0xFF
+                else -> error("unexpected CBOR additional info: " + additional)
+            }
+            return when (major) {
+                0 -> length
+                1 -> -1 - length
+                2 -> cose.copyOfRange(offset, offset + length).also { offset += length }
+                else -> error("unexpected CBOR major type: " + major)
+            }
         }
 
-        fun readBytes(): ByteArray {
-            val initial = cose[offset].toInt() and 0xFF
-            offset++
-            val additional = initial and 0x1F
-            val length = if (additional < 24) additional else (cose[offset++].toInt() and 0xFF)
-            return cose.copyOfRange(offset, offset + length).also { offset += length }
-        }
-
-        val count = (cose[0].toInt() and 0x1F).also { offset = 1 }
-        repeat(count) {
-            when (val key = readInt()) {
-                -2 -> x = readBytes()
-                -3 -> y = readBytes()
-                else -> readBytes()
+        repeat(entryCount) {
+            when (val key = readValue() as Int) {
+                -2 -> x = readValue() as ByteArray
+                -3 -> y = readValue() as ByteArray
+                else -> readValue()
             }
         }
 
