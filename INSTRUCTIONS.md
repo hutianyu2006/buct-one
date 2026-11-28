@@ -66,15 +66,19 @@
 ### Phase 0：跨端底座收尾（阻塞一切后续功能）
 
 > Phase 0 的三项底座已完成（图形验证码与静默重登、Passkey 协议层、WebVPN 自动降级），
-> 落地细节见 `docs/规划.md`「已迁移的双端共享代码」。平台认证器（`PlatformPasskeySigner` 的
-> Android/iOS 实现）仍待接：接口与协议层已就位，缺的是两端各自的系统认证器绑定。
+> 落地细节见 `docs/规划.md`「已迁移的双端共享代码」。Android 侧平台认证器已绑定
+> （Keystore 软件认证器 + 系统生物识别）；iOS 侧仍待接，见 Task 0.4。
 
 #### Task 0.4：平台通行密钥认证器绑定
-- **现状**：`data/login/CasPasskeyClient.kt`（协议）+ `PlatformPasskeySigner`（接口）+ `platform/crypto/Rsa.kt`（RSA-PKCS#1）已共享，MockEngine 覆盖 options 解析、断言提交、`/finish` 成功与失败分支。
-- **做什么**：
-  1. **Android**：把 `app/.../LoginActivity.kt` 里现有的 `BuctWebAuthnManager` + `BuctSoftwarePasskey` 改造成 `PlatformPasskeySigner` 实现，协议部分改为调用共享 `CasPasskeyClient`（登录页交互与文案保持不变）。
-  2. **iOS**：在 `shared/src/iosMain` 用 `AuthenticationServices` 的 `ASAuthorizationPlatformPublicKeyCredentialProvider` 实现同一接口，凭据只进 Keychain。
-- **验收**：Android 通行密钥登录/注册行为与现网一致；iOS 能弹出系统认证器并把断言交给共享协议层；`:shared:jvmTest` 全绿。
+- **现状**：`data/login/CasPasskeyClient.kt`（协议）+ `PlatformPasskeySigner`（接口）+ `platform/crypto/Rsa.kt`（RSA-PKCS#1）已共享，MockEngine 覆盖 options 解析、断言提交、`/finish` 成功与失败分支。**Android 已完成绑定**：新增 `app/.../login/AndroidPasskeySigner.kt`（`PlatformPasskeySigner` 实现，Keystore EC P-256 + `BiometricPrompt` 的 `CryptoObject`），`LoginActivity` 的登录 / 注册流程改为调用共享 `CasPasskeyClient`（取选项 → 平台签名 → 提交断言 → 跟随票据），重复的 `BuctWebAuthnManager`（618 行）已删除；注册前「个人中心 → 安全设置页」预热收敛到共享 `CasPasskeyClient.warmUpAccountContext()`。
+- **做什么（只剩 iOS）**：
+  1. 在 `shared/src/iosMain` 提供 `PlatformPasskeySigner` 的 iOS 实现，并在 iOS 登录页接入「通行密钥登录」入口（协议仍走共享 `CasPasskeyClient`）。
+  2. **前置条件（阻塞项）**：系统认证器（`ASAuthorizationPlatformPublicKeyCredentialProvider`）要求 App 声明
+     `webcredentials:sidportal.buct.edu.cn` 关联域，且学校必须在 `https://sidportal.buct.edu.cn/.well-known/apple-app-site-association`
+     公开 AASA 文件 —— 与 Android 因缺少 `assetlinks.json` 而改用 App 内软件认证器是同一个原因。
+     因此先确认学校是否支持；若不支持，iOS 需照 Android 的做法实现 **Secure Enclave 软件认证器**
+     （`SecKeyCreateRandomKey` + P-256 + 本地 CBOR/COSE 组包），凭据只进 Keychain。
+- **验收**：Android 通行密钥登录/注册行为与现网一致（已达成，`:app:compileDebugSources` 通过）；iOS 侧待关联域结论后再落地，`:shared:jvmTest` 保持全绿。
 
 ---
 
@@ -84,20 +88,8 @@
 > `shared/commonMain/data/source/<域>/<Domain>Gateway.kt`（Ktor 请求 + 调用现有 `*Parser`） → `shared/commonMain/data/source/<域>/<Domain>Controller.kt`（组合 `DomainSync` + `*SnapshotStore`） → `shared/commonTest` 补 `MockEngine` 集成测试 → Android 侧 `SyncService` 改为委托共享 Gateway/Controller。  
 > 共享网关/控制器已落地的域，只剩最后一步"Android 改委托"与平台参数注入。
 
-> **Phase 1 已全部完成**（电费签名密钥注入、门户/体测 Android 改委托、第二课堂网关下沉 + iOS 页面），
-> 落地细节见 `docs/规划.md`。下面只保留尚未接通的 iOS 门户页面。
-
-#### Task 1.5：iOS i北化页面
-- **现状**：`PortalGateway`（校历 / 教学周 / 在借图书 / 四栏资讯）已下沉，Android `PortalClient` 已改委托；
-  iOS 尚无对应页面（只有网关与 `PortalGatewayTest`）。
-- **做什么**：
-  1. 在 `shared/src/iosMain/.../ui/` 新增「i北化」页：校历与当前教学周、图书馆在借清单与应还提醒、
-     四栏资讯列表与正文阅读（复用现有 `Markdown` / 主题组件）。
-  2. 新增 `PortalController`（组合 `DomainSync` + 新的 `PortalSnapshotStore`，三份快照 calendar / library / news），
-     会话失效单独成态，失败保留旧快照。
-  3. 校外访问依赖 `WebVpnRequestExecutor`（Phase 0 已完成）；确认 `i.buct.edu.cn` / `mnews.buct.edu.cn`
-     都走「直连优先 → 403 转代理」链路。
-- **验收**：iOS 能看校历/教学周、在借图书与四栏资讯；`:shared:jvmTest` 覆盖 Controller 的失败保留旧快照与会话失效分支。
+> **Phase 1 已全部完成**（电费签名密钥注入、门户/体测 Android 改委托、第二课堂网关下沉 + iOS 页面、
+> i北化 iOS 页面与三份快照控制器），落地细节见 `docs/规划.md`。
 
 ---
 
