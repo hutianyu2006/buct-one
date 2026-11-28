@@ -26,13 +26,15 @@ class PortalGatewayTest {
     fun calendarRequestCarriesContextParameter() = runTest {
         val seenQueries = mutableListOf<String>()
         val engine = MockEngine { request ->
-            val query = request.url.encodedQuery ?: ""
+            val query = request.url.encodedQuery.orEmpty()
             seenQueries += query
+            // 校历接口的真实响应是 {result, data{beginDate,endDate,jxz,retStr}}，
+            // 解析器按 result=1 判定成功，缺字段会抛异常。
             val body = if (request.url.encodedPath.contains("getJxz")) {
-                """{"wid":"1","academicYear":2026,"semester":1,"termId":"2026-1",""" +
-                    """"beginDate":"2026-09-01","endDate":"2027-01-15","currentTeachingWeek":12,"isCurrent":true}"""
+                """{"result":"1","data":{"beginDate":"2026-09-01","endDate":"2027-01-15","jxz":12,""" +
+                    """"retStr":[{"xn":2026,"xq":1,"ksrq":"2026-09-01","jsrq":"2027-01-15","sfdqxq":"1","wid":"1"}]}}"""
             } else {
-                "[]"
+                """{"result":"1","data":{"data":[]}}"""
             }
             respond(body, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
         }
@@ -69,10 +71,10 @@ class PortalGatewayTest {
             val columnId = request.url.parameters["columnId"].orEmpty()
             if (columnId == com.buct.one.data.model.PortalNewsColumn.NOTICE.columnId) {
                 respond(
-                    """{"totalCount":"1","articles":[{"id":"a1","title":"通知","sourceOrg":"学工办",""" +
-                        """"publishTimestampMs":1700000000000,"summary":"s","content":"c",""" +
-                        """"publicUrl":"https://i.buct.edu.cn/a","isTop":false,"isHot":false,""" +
-                        """"isNewest":true,"visitCount":"10"}]}""",
+                    """{"result":"1","data":{"count":"1","articles":[{"id":"a1","title":"通知",""" +
+                        """"from":"学工办","publishTimestamp":"1700000000000","summary":"s","content":"c",""" +
+                        """"linkUrl":"https://i.buct.edu.cn/a","isTop":"0","isHot":"0",""" +
+                        """"isNewest":"1","visitCount":"10"}]}}""",
                     HttpStatusCode.OK,
                     headersOf(HttpHeaders.ContentType, "application/json"),
                 )

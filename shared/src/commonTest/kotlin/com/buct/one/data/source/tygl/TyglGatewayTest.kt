@@ -19,7 +19,7 @@ class TyglGatewayTest {
 
     private fun gateway(handler: (String) -> Pair<String, HttpStatusCode>): TyglGateway {
         val engine = MockEngine { request ->
-            val (body, status) = handler(request.url.encodedPath + "?" + (request.url.encodedQuery ?: ""))
+            val (body, status) = handler(request.url.encodedPath + "?" + request.url.encodedQuery.orEmpty())
             respond(body, status, headersOf(HttpHeaders.ContentType, "text/html"))
         }
         return TyglGateway(buildHttpClient(engine, followRedirects = false), userAgent = "test-UA")
