@@ -112,9 +112,9 @@ class SoftwarePasskeyAuthenticator(
 
     /** 删除本机凭据（退出登录 / 重新创建前）。 */
     fun clearCredential(username: String) {
-        val alias = credentialAlias(username)
-        vault.remove(ALIAS_PASSKEY, alias)
-        vault.remove(ALIAS_PASSKEY, "$alias.signCount")
+        vault.remove(ALIAS_PASSKEY, credentialIdAlias(username))
+        vault.remove(ALIAS_PASSKEY, credentialKeyAlias(username))
+        vault.remove(ALIAS_PASSKEY, signCountAlias(username))
     }
 
     // ---------- 内部 ----------
