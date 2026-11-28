@@ -32,20 +32,22 @@ class SsoSilentReloginCoordinatorTest {
     @Test
     fun success_clearsPasswordArray() = runTest {
         val clock = FakeClock()
-        var capturedPassword = CharArray(0)
+        // 持有同一份数组引用（不是拷贝），才能观察到协调器在 finally 里清零
+        val passwordChars = "p@ss".toCharArray()
+        var seenPassword = ""
         val relogin = SsoSilentReloginCoordinator(
-            credentialsProvider = { credentials() },
+            credentialsProvider = { SsoCredentials("20230001", passwordChars) },
             clock = { clock.now },
         )
-        val ok = relogin.attemptRelogin(sidSnapshotBefore = "old") { username, passwordChars ->
+        val ok = relogin.attemptRelogin(sidSnapshotBefore = "old") { username, chars ->
             assertEquals("20230001", username)
-            capturedPassword = passwordChars.copyOf()
+            seenPassword = chars.concatToString()
             true
         }
         assertTrue(ok)
-        assertEquals("p@ss", capturedPassword.concatToString())
-        // 无论成功失败，密码数组用完必须清零
-        assertTrue(capturedPassword.all { it == '\u0000' })
+        // 登录时拿到的是明文（服务端需要），用完立即清零
+        assertEquals("p@ss", seenPassword)
+        assertTrue(passwordChars.all { it == '\u0000' })
     }
 
     @Test
@@ -151,16 +153,14 @@ class SsoSilentReloginCoordinatorTest {
     @Test
     fun exceptionInsideLogin_isTreatedAsFailureAndClears() = runTest {
         val clock = FakeClock()
-        var captured = CharArray(0)
+        val passwordChars = "p@ss".toCharArray()
         val relogin = SsoSilentReloginCoordinator(
-            credentialsProvider = { credentials() },
+            credentialsProvider = { SsoCredentials("20230001", passwordChars) },
             clock = { clock.now },
         )
-        val ok = relogin.attemptRelogin("") { _, passwordChars ->
-            captured = passwordChars.copyOf()
-            throw IllegalStateException("boom")
-        }
+        val ok = relogin.attemptRelogin("") { _, _ -> throw IllegalStateException("boom") }
         assertFalse(ok)
-        assertTrue(captured.all { it == '\u0000' })
+        // 异常路径同样必须清零
+        assertTrue(passwordChars.all { it == '\u0000' })
     }
 }
