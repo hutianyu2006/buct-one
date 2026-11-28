@@ -65,20 +65,21 @@
 
 ### Phase 0：跨端底座收尾（阻塞一切后续功能）
 
-> Phase 0 的三项底座已完成（图形验证码与静默重登、Passkey 协议层、WebVPN 自动降级），
-> 落地细节见 `docs/规划.md`「已迁移的双端共享代码」。Android 侧平台认证器已绑定
-> （Keystore 软件认证器 + 系统生物识别）；iOS 侧仍待接，见 Task 0.4。
+> **Phase 0 已全部完成**：图形验证码与静默重登、Passkey 协议层 + 双端平台认证器、WebVPN 自动降级，
+> 落地细节见 `docs/规划.md`「已迁移的双端共享代码」。
 
-#### Task 0.4：平台通行密钥认证器绑定
-- **现状**：`data/login/CasPasskeyClient.kt`（协议）+ `PlatformPasskeySigner`（接口）+ `platform/crypto/Rsa.kt`（RSA-PKCS#1）已共享，MockEngine 覆盖 options 解析、断言提交、`/finish` 成功与失败分支。**Android 已完成绑定**：新增 `app/.../login/AndroidPasskeySigner.kt`（`PlatformPasskeySigner` 实现，Keystore EC P-256 + `BiometricPrompt` 的 `CryptoObject`），`LoginActivity` 的登录 / 注册流程改为调用共享 `CasPasskeyClient`（取选项 → 平台签名 → 提交断言 → 跟随票据），重复的 `BuctWebAuthnManager`（618 行）已删除；注册前「个人中心 → 安全设置页」预热收敛到共享 `CasPasskeyClient.warmUpAccountContext()`。
-- **做什么（只剩 iOS）**：
-  1. 在 `shared/src/iosMain` 提供 `PlatformPasskeySigner` 的 iOS 实现，并在 iOS 登录页接入「通行密钥登录」入口（协议仍走共享 `CasPasskeyClient`）。
-  2. **前置条件（阻塞项）**：系统认证器（`ASAuthorizationPlatformPublicKeyCredentialProvider`）要求 App 声明
-     `webcredentials:sidportal.buct.edu.cn` 关联域，且学校必须在 `https://sidportal.buct.edu.cn/.well-known/apple-app-site-association`
-     公开 AASA 文件 —— 与 Android 因缺少 `assetlinks.json` 而改用 App 内软件认证器是同一个原因。
-     因此先确认学校是否支持；若不支持，iOS 需照 Android 的做法实现 **Secure Enclave 软件认证器**
-     （`SecKeyCreateRandomKey` + P-256 + 本地 CBOR/COSE 组包），凭据只进 Keychain。
-- **验收**：Android 通行密钥登录/注册行为与现网一致（已达成，`:app:compileDebugSources` 通过）；iOS 侧待关联域结论后再落地，`:shared:jvmTest` 保持全绿。
+> **通行密钥（Task 0.4）已完成**：
+> - **共享核心**：`data/login/SoftwarePasskeyAuthenticator.kt` 按 WebAuthn 标准生成 P-256 密钥、
+>   组包 attestationObject / authenticatorData（含 CBOR 编码）并做 ECDSA-SHA256 签名，
+>   私钥标量由平台钩子写入安全存储；`platform/crypto/P256.kt` 提供纯 Kotlin 曲线运算与 DER 签名。
+> - **Android**：`app/.../login/AndroidPasskeySigner.kt` 实现 `PlatformPasskeySigner`
+>   （Keystore EC P-256 + `BiometricPrompt.CryptoObject`），`LoginActivity` 的登录 / 注册流程
+>   全部改调共享 `CasPasskeyClient`，618 行重复协议 `BuctWebAuthnManager` 已删除。
+> - **iOS**：`platform/IosPasskeySigner.kt` 复用同一份共享认证器（Keychain 存私钥 +
+>   `LAContext` 要求 Face ID / Touch ID），登录页新增「用通行密钥登录」入口。
+> - **为什么不用系统认证器**：系统通行密钥要求 RP 声明关联域（Android `assetlinks.json` /
+>   iOS AASA），学校均未发布，因此两端都走 App 内软件认证器（同一套 WebAuthn 格式）。
+> - **验证**：`shared/src/jvmTest` 用 JDK 标准 `SHA256withECDSA` 对共享实现产出的断言验签通过。
 
 ---
 
